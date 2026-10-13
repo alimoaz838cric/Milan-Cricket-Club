@@ -173,7 +173,7 @@ var CREDIT = ['bowled','caught','lbw','stumped','hitwicket'];
 function same(a,b){ return String(a||'').trim().toLowerCase() === String(b||'').trim().toLowerCase(); }
 function fmtOv(b){ return Math.floor(b/6) + '.' + (b%6); }
 function newMatch(){
-  return {v:1, setup:{title:'', a:'Team A', b:'Team B', batFirst:'a', overs:30, maxWkts:10, maxBowlerOvers:6, playersA:[], playersB:[], capA:'', vcA:'', twA:'', capB:'', vcB:'', twB:''}, inns:[]};
+  return {v:1, setup:{title:'', a:'Team A', b:'Team B', batFirst:'a', overs:30, maxWkts:10, maxBowlerOvers:6, playersA:[], playersB:[], capA:'', vcA:'', wkA:'', twA:'', capB:'', vcB:'', wkB:'', twB:'', pinfo:[]}, inns:[]};
 }
 function teamName(side){ return side==='a' ? M.setup.a : M.setup.b; }
 function battingSide(i){ return i===0 ? M.setup.batFirst : (M.setup.batFirst==='a' ? 'b' : 'a'); }
@@ -182,12 +182,13 @@ function bowlTeam(i){ return teamName(battingSide(i)==='a' ? 'b' : 'a'); }
 
 function howOut(w, bowler){
   var f = w.fielder || '?';
+  var fk = (w.fielder && typeof isKeeper === 'function' && isKeeper(w.fielder)) ? '\u2020' + f : f;
   switch(w.type){
     case 'bowled': return 'b ' + bowler;
-    case 'caught': return same(f,bowler) ? 'c & b ' + bowler : 'c ' + f + ' b ' + bowler;
+    case 'caught': return same(f,bowler) ? 'c & b ' + bowler : 'c ' + fk + ' b ' + bowler;
     case 'lbw': return 'lbw b ' + bowler;
     case 'runout': return 'run out (' + f + ')';
-    case 'stumped': return 'st ' + f + ' b ' + bowler;
+    case 'stumped': return 'st ' + fk + ' b ' + bowler;
     case 'hitwicket': return 'hit wicket b ' + bowler;
     default: return w.desc || 'out';
   }
@@ -338,17 +339,42 @@ function asList(x){
 function squadList(side){ return asList(side==='a' ? M.setup.playersA : M.setup.playersB); }
 function squadRole(side){
   var S = M.setup;
-  return side==='a' ? {cap:S.capA||'', vc:S.vcA||'', tw:S.twA||''} : {cap:S.capB||'', vc:S.vcB||'', tw:S.twB||''};
+  return side==='a' ? {cap:S.capA||'', vc:S.vcA||'', wk:S.wkA||'', tw:S.twA||''} : {cap:S.capB||'', vc:S.vcB||'', wk:S.wkB||'', tw:S.twB||''};
+}
+var HANDS = [{v:'R', l:'Right-hand bat', a:'RHB'}, {v:'L', l:'Left-hand bat', a:'LHB'}];
+var STYLES = [
+  {v:'RAOS', l:'Right-arm off spin', a:'RAOS'}, {v:'LAOS', l:'Slow left-arm orthodox', a:'SLA'},
+  {v:'RALS', l:'Right-arm leg spin', a:'RALS'}, {v:'LALS', l:'Left-arm leg spin', a:'LALS'},
+  {v:'RAM', l:'Right-arm medium', a:'RAM'}, {v:'LAM', l:'Left-arm medium', a:'LAM'},
+  {v:'RAF', l:'Right-arm fast', a:'RAF'}, {v:'LAF', l:'Left-arm fast', a:'LAF'}];
+function infoList(){ return asList(M.setup.pinfo); }
+function infoOf(name){ var l = infoList(); for(var k = 0; k < l.length; k++){ if(same(l[k].n, name)) return l[k]; } return null; }
+function handOf(name){ var i = infoOf(name); if(!i || !i.h) return null; for(var k = 0; k < HANDS.length; k++){ if(HANDS[k].v === i.h) return HANDS[k]; } return null; }
+function styleOf(name){ var i = infoOf(name); if(!i || !i.b) return null; for(var k = 0; k < STYLES.length; k++){ if(STYLES[k].v === i.b) return STYLES[k]; } return null; }
+function detailText(name){ var p = [], hh = handOf(name), ss = styleOf(name); if(hh) p.push(hh.l); if(ss) p.push(ss.l); return p.join(', '); }
+function subLabel(name, kind){
+  var o = kind==='bat' ? handOf(name) : styleOf(name);
+  return o ? '<div class="lbl" style="font-weight:500">' + esc(o.l) + '</div>' : '';
+}
+function abbrSpan(name, kind){
+  var o = kind==='bat' ? handOf(name) : styleOf(name);
+  return o ? ' <span class="lbl">' + o.a + '</span>' : '';
+}
+function isKeeper(name){
+  if(!name) return false;
+  var a = squadRole('a').wk, b = squadRole('b').wk;
+  return !!((a && same(name, a)) || (b && same(name, b)));
 }
 function roleTag(name){
-  var sides = ['a','b'];
-  for(var k = 0; k < 2; k++){
-    var r = squadRole(sides[k]);
-    if(r.cap && same(name, r.cap)) return ' (c)';
-    if(r.vc && same(name, r.vc)) return ' (vc)';
-    if(r.tw && same(name, r.tw)) return ' (12th)';
-  }
-  return '';
+  var roles = [];
+  ['a','b'].forEach(function(side){
+    var r = squadRole(side);
+    if(r.cap && same(name, r.cap)) roles.push('c');
+    if(r.vc && same(name, r.vc)) roles.push('vc');
+    if(r.wk && same(name, r.wk)) roles.push('wk');
+    if(r.tw && same(name, r.tw)) roles.push('12th');
+  });
+  return roles.length ? ' (' + roles.join(', ') + ')' : '';
 }
 /* every player we know for a team: the squad, plus anyone who batted, bowled or fielded for them (added as they come in) */
 function knownPlayers(side){
@@ -387,13 +413,19 @@ function waitFor(test, ms){
   });
 }
 function squadBlock(side){
-  var list = squadList(side), r = squadRole(side), known = knownPlayers(side);
+  var list = squadList(side), r = squadRole(side), known = knownPlayers(side), sc = isScorer();
   var extra = known.filter(function(x){ return !list.some(function(y){ return same(x, y); }) && !(r.tw && same(x, r.tw)); });
-  var html = '<div class="line"><div class="nm">' + esc(teamName(side)) + '</div>' + (isScorer() ? '<button class="chip" data-m="squad' + side + '">Edit squad</button>' : '') + '</div>';
-  html += '<div class="line" style="display:block"><div>' +
-    (list.length ? list.map(function(x){ return esc(x) + esc(roleTag(x)); }).join(', ') : '<span class="lbl">No squad entered. Names are added as players come in.</span>') + '</div>' +
-    (r.tw ? '<div class="lbl" style="margin-top:6px">12th man: ' + esc(r.tw) + '</div>' : '') +
-    (extra.length ? '<div class="lbl" style="margin-top:6px">Added during the match: ' + extra.map(esc).join(', ') + '</div>' : '') + '</div>';
+  function row(x, note){
+    var det = detailText(x);
+    return '<div class="line lg"><div class="nm">' + esc(x) + esc(roleTag(x)) + (note ? ' <span class="lbl">' + note + '</span>' : '') +
+      (det ? '<div class="lbl" style="font-weight:500">' + esc(det) + '</div>' : '') + '</div>' +
+      (sc ? '<button class="chip" data-p="' + esc(x) + '">Details</button>' : '') + '</div>';
+  }
+  var html = '<div class="line"><div class="nm">' + esc(teamName(side)) + '</div>' + (sc ? '<button class="chip" data-m="squad' + side + '">Edit squad</button>' : '') + '</div>';
+  if(!list.length && !extra.length && !r.tw) html += '<div class="line"><span class="lbl">No squad entered. Names are added as players come in.</span></div>';
+  list.forEach(function(x){ html += row(x, ''); });
+  extra.forEach(function(x){ html += row(x, 'added during the match'); });
+  if(r.tw) html += row(r.tw, '');
   return html;
 }
 async function editSquad(side){
@@ -404,34 +436,82 @@ async function editSquad(side){
       '<p class="sub">One player per line (up to 15). You can leave this empty and names will be added as players come in.</p>' +
       '<div class="field"><label>Players</label><textarea id="sqp" placeholder="One name per line">' + esc(cur.join('\n')) + '</textarea></div>' +
       '<div class="two"><div class="field"><label>Captain</label><select id="sqc"></select></div><div class="field"><label>Vice-captain</label><select id="sqv"></select></div></div>' +
-      '<div class="field"><label>12th man (optional)</label><input type="text" id="sqt" autocomplete="off" value="' + esc(r.tw) + '" placeholder="Name"></div>' +
+      '<div class="two"><div class="field"><label>Wicket-keeper</label><select id="sqw"></select></div><div class="field"><label>12th man (optional)</label><input type="text" id="sqt" autocomplete="off" value="' + esc(r.tw) + '" placeholder="Name"></div></div>' +
+      '<div class="h3" style="margin-top:6px">Batting hand and bowling style (optional)</div><div id="sqd"></div>' +
       '<div class="acts"><button class="btn alt" data-x="c">Cancel</button><button class="btn" data-x="ok">Save squad</button></div>';
-    var ta = sh.querySelector('#sqp'), sc = sh.querySelector('#sqc'), sv = sh.querySelector('#sqv'), st12 = sh.querySelector('#sqt');
+    var ta = sh.querySelector('#sqp'), st12 = sh.querySelector('#sqt'), box = sh.querySelector('#sqd');
+    var sels = {c:sh.querySelector('#sqc'), v:sh.querySelector('#sqv'), w:sh.querySelector('#sqw')};
+    var info = {}, ns = [];
+    infoList().forEach(function(x){ info[String(x.n).toLowerCase()] = {h:x.h || '', b:x.b || ''}; });
+    function opts(arr, sel, first){
+      return '<option value="">' + first + '</option>' + arr.map(function(o){ return '<option value="' + esc(o.v) + '"' + (o.v === sel ? ' selected' : '') + '>' + esc(o.l) + '</option>'; }).join('');
+    }
     function fill(){
-      var ns = parseNames(ta.value);
-      [[sc, r.cap],[sv, r.vc]].forEach(function(p){
-        var sel = p[0], keep = sel.value || p[1];
+      ns = parseNames(ta.value);
+      [['c', r.cap], ['v', r.vc], ['w', r.wk]].forEach(function(p){
+        var sel = sels[p[0]], keep = sel.value || p[1];
         sel.innerHTML = '<option value="">None</option>' + ns.map(function(x){ return '<option value="' + esc(x) + '"' + (same(x, keep) ? ' selected' : '') + '>' + esc(x) + '</option>'; }).join('');
       });
+      box.innerHTML = ns.map(function(x, k){
+        var d = info[x.toLowerCase()] || {h:'', b:''};
+        return '<div class="field" data-i="' + k + '"><label>' + esc(x) + '</label><div class="two"><select class="ph">' + opts(HANDS, d.h, 'Batting hand') + '</select><select class="pb">' + opts(STYLES, d.b, 'Bowling style') + '</select></div></div>';
+      }).join('') || '<p class="lbl">Add players above to set their details.</p>';
     }
     fill();
     ta.addEventListener('input', fill);
+    box.addEventListener('change', function(e){
+      var row = e.target.closest('[data-i]'); if(!row) return;
+      var nm = ns[+row.dataset.i]; if(!nm) return;
+      info[nm.toLowerCase()] = {h:row.querySelector('.ph').value, b:row.querySelector('.pb').value};
+    });
     sh.addEventListener('click', function(e){
       var b = e.target.closest('button'); if(!b) return;
       if(b.dataset.x==='c') close(null);
       else if(b.dataset.x==='ok'){
-        var players = parseNames(ta.value), cap = sc.value, vc = sv.value;
+        var players = parseNames(ta.value), cap = sels.c.value, vc = sels.v.value, det = [];
         if(same(cap, vc)) vc = '';
-        close({players:players, cap:cap, vc:vc, tw:parseNames(st12.value)[0] || ''});
+        players.forEach(function(x){ var d = info[x.toLowerCase()]; if(d && (d.h || d.b)) det.push({n:x, h:d.h || '', b:d.b || ''}); });
+        close({players:players, cap:cap, vc:vc, wk:sels.w.value, tw:parseNames(st12.value)[0] || '', det:det});
       }
     });
   });
   if(!res) return;
   var k = side==='a' ? 'A' : 'B', upd = {};
-  upd['players' + k] = res.players.length ? res.players : null;
-  upd['cap' + k] = res.cap; upd['vc' + k] = res.vc; upd['tw' + k] = res.tw;
+  var players = res.players || [];
+  upd['players' + k] = players.length ? players : null;
+  upd['cap' + k] = res.cap || ''; upd['vc' + k] = res.vc || ''; upd['wk' + k] = res.wk || ''; upd['tw' + k] = res.tw || '';
+  var keep = infoList().filter(function(x){ return !players.some(function(p){ return same(p, x.n); }); });
+  var all = keep.concat(res.det || []);
+  upd.pinfo = all.length ? all : null;
   try{ await LIVE.fb.update(dbRef('matches/' + LIVE.mid + '/setup'), upd); toast('Squad saved'); }
   catch(err){ writeError(err); }
+}
+async function editPlayer(name){
+  if(!isScorer()){ toast('Only the scorer can change player details'); return; }
+  var cur = infoOf(name) || {h:'', b:''};
+  var res = await sheet(function(sh, close){
+    function opts(arr, sel, first){
+      return '<option value="">' + first + '</option>' + arr.map(function(o){ return '<option value="' + esc(o.v) + '"' + (o.v === sel ? ' selected' : '') + '>' + esc(o.l) + '</option>'; }).join('');
+    }
+    sh.innerHTML = '<h2>' + esc(name) + '</h2>' +
+      '<div class="field"><label>Batting hand</label><select id="pdh">' + opts(HANDS, cur.h, 'Not set') + '</select></div>' +
+      '<div class="field"><label>Bowling style</label><select id="pdb">' + opts(STYLES, cur.b, 'Not set') + '</select></div>' +
+      '<div class="acts"><button class="btn alt" data-x="c">Cancel</button><button class="btn" data-x="ok">Save</button></div>';
+    sh.addEventListener('click', function(e){
+      var b = e.target.closest('button'); if(!b) return;
+      if(b.dataset.x==='c') close(null);
+      else if(b.dataset.x==='ok') close({h:sh.querySelector('#pdh').value, b:sh.querySelector('#pdb').value});
+    });
+  });
+  if(!res) return;
+  var list = infoList().filter(function(x){ return !same(x.n, name); });
+  if(res.h || res.b) list.push({n:name, h:res.h || '', b:res.b || ''});
+  try{ await LIVE.fb.update(dbRef('matches/' + LIVE.mid + '/setup'), {pinfo: list.length ? list : null}); toast('Saved'); }
+  catch(err){ writeError(err); }
+}
+async function playerAction(name){
+  if(ui.busy) return; ui.busy = true;
+  try{ await editPlayer(name); } finally { ui.busy = false; render(); }
 }
 function allNames(){
   var n = [];
@@ -468,7 +548,7 @@ function bowlChips(i){
   var fs = battingSide(i)==='a' ? 'b' : 'a', tw = squadRole(fs).tw;
   return knownPlayers(fs).filter(function(x){ return !(tw && same(x, tw)); });
 }
-function fieldChips(i){ var fs = battingSide(i)==='a' ? 'b' : 'a', tw = squadRole(fs).tw; return uniq(knownPlayers(fs).concat(tw ? [tw] : [])); }
+function fieldChips(i){ var fs = battingSide(i)==='a' ? 'b' : 'a', r = squadRole(fs); return uniq((r.wk ? [r.wk] : []).concat(knownPlayers(fs)).concat(r.tw ? [r.tw] : [])); }
 
 /* ------------------------------ sheets ------------------------------- */
 function sheet(build){
@@ -728,7 +808,8 @@ async function wicket(){
     f = await ask({title:'Fielder who broke the wicket', chips:fch, optional:true}); if(f===null) return;
     w.fielder = f ? canon(f) : '';
   } else if(type==='stumped'){
-    f = await ask({title:'Wicket-keeper', chips:fch, optional:true}); if(f===null) return;
+    var kp = squadRole(battingSide(i)==='a' ? 'b' : 'a').wk;
+    if(kp){ f = kp; } else { f = await ask({title:'Wicket-keeper', chips:fch, optional:true}); if(f===null) return; }
     w.fielder = f ? canon(f) : '';
     c = await choose('Was it a wide?', [{l:'No',v:0},{l:'Yes',v:1}]); if(c===null) return;
     if(c) ev.wd = 1;
@@ -1186,11 +1267,11 @@ function renderScore(){
   function bat(name, star){
     var b = null; st.batters.forEach(function(x){ if(same(x.name,name)) b = x; });
     if(!name) return '';
-    return '<div class="line"><div class="nm">' + esc(name) + esc(roleTag(name)) + (star ? '<i>*</i>' : '') + '</div><div class="st num">' + (b?b.runs:0) + ' <small>(' + (b?b.balls:0) + ')</small></div></div>';
+    return '<div class="line"><div class="nm">' + esc(name) + esc(roleTag(name)) + (star ? '<i>*</i>' : '') + subLabel(name, 'bat') + '</div><div class="st num">' + (b?b.runs:0) + ' <small>(' + (b?b.balls:0) + ')</small></div></div>';
   }
   html += '<div class="card">' + bat(st.striker, true) + bat(st.non, false);
   var bo = null; st.bowlers.forEach(function(x){ if(same(x.name, st.bowler)) bo = x; });
-  html += '<div class="line"><div><div class="lbl">Bowling</div><div class="nm">' + esc(st.bowler) + esc(roleTag(st.bowler)) + '</div></div>' +
+  html += '<div class="line"><div><div class="lbl">Bowling</div><div class="nm">' + esc(st.bowler) + esc(roleTag(st.bowler)) + subLabel(st.bowler, 'bowl') + '</div></div>' +
     '<div class="st num">' + (bo ? fmtOv(bo.balls) + '-' + bo.maidens + '-' + bo.runs + '-' + bo.wkts : '') + '</div></div></div>';
   html += '<div class="card"><div class="line" style="padding-bottom:0"><div class="lbl">This over</div></div><div class="over">' +
     (st.thisOver.length ? st.thisOver.map(function(l){ return '<span class="ball num ' + ballClass(l) + '">' + esc(l) + '</span>'; }).join('') : '<span class="lbl">No balls yet</span>') + '</div></div>';
@@ -1217,7 +1298,7 @@ function renderCard(){
   if(ui.cardView==='log'){ v.innerHTML = html + renderLog(i, st); return; }
   html += '<div class="h3" style="margin-top:4px">' + esc(batTeam(i)) + ' batting</div><div class="tw"><table><tr><th>Batter</th><th>R</th><th>B</th><th>4s</th><th>6s</th><th>SR</th></tr>';
   st.batters.forEach(function(b){
-    html += '<tr><td>' + esc(b.name) + esc(roleTag(b.name)) + '<span class="how">' + esc(b.how) + '</span></td><td class="num"><b>' + b.runs + '</b></td><td class="num">' + b.balls + '</td><td class="num">' + b.fours + '</td><td class="num">' + b.sixes + '</td><td class="num">' + (b.balls ? (b.runs/b.balls*100).toFixed(1) : '-') + '</td></tr>';
+    html += '<tr><td>' + esc(b.name) + esc(roleTag(b.name)) + abbrSpan(b.name, 'bat') + '<span class="how">' + esc(b.how) + '</span></td><td class="num"><b>' + b.runs + '</b></td><td class="num">' + b.balls + '</td><td class="num">' + b.fours + '</td><td class="num">' + b.sixes + '</td><td class="num">' + (b.balls ? (b.runs/b.balls*100).toFixed(1) : '-') + '</td></tr>';
   });
   var ex = st.extras, exT = ex.wd + ex.nb + ex.b + ex.lb;
   html += '<tr><td>Extras<span class="how">b ' + ex.b + ', lb ' + ex.lb + ', w ' + ex.wd + ', nb ' + ex.nb + '</span></td><td class="num"><b>' + exT + '</b></td><td></td><td></td><td></td><td></td></tr>';
@@ -1227,7 +1308,7 @@ function renderCard(){
   }
   html += '<div class="h3">Bowling ' + esc(bowlTeam(i)) + '</div><div class="tw"><table><tr><th>Bowler</th><th>O</th><th>M</th><th>R</th><th>W</th><th>Econ</th><th>Wd</th><th>Nb</th></tr>';
   st.bowlers.forEach(function(b){
-    html += '<tr><td>' + esc(b.name) + esc(roleTag(b.name)) + '</td><td class="num">' + fmtOv(b.balls) + '</td><td class="num">' + b.maidens + '</td><td class="num">' + b.runs + '</td><td class="num"><b>' + b.wkts + '</b></td><td class="num">' + (b.balls ? (b.runs/(b.balls/6)).toFixed(2) : '-') + '</td><td class="num">' + b.wd + '</td><td class="num">' + b.nb + '</td></tr>';
+    html += '<tr><td>' + esc(b.name) + esc(roleTag(b.name)) + abbrSpan(b.name, 'bowl') + '</td><td class="num">' + fmtOv(b.balls) + '</td><td class="num">' + b.maidens + '</td><td class="num">' + b.runs + '</td><td class="num"><b>' + b.wkts + '</b></td><td class="num">' + (b.balls ? (b.runs/(b.balls/6)).toFixed(2) : '-') + '</td><td class="num">' + b.wd + '</td><td class="num">' + b.nb + '</td></tr>';
   });
   html += '</table></div>';
   var parts = st.parts.slice();
@@ -1359,8 +1440,10 @@ function buildText(){
   var S = M.setup, out = [];
   out.push((S.title ? S.title + '\n' : '') + S.a + ' v ' + S.b + ' (' + S.overs + ' overs)');
   ['a','b'].forEach(function(side){
-    var list = squadList(side), r = squadRole(side);
-    if(list.length || r.tw) out.push(teamName(side) + ': ' + list.map(function(x){ return x + roleTag(x); }).join(', ') + (r.tw ? '. 12th man: ' + r.tw : ''));
+    var r = squadRole(side), names = knownPlayers(side).slice();
+    if(r.tw) names.push(r.tw);
+    names = uniq(names);
+    if(names.length) out.push(teamName(side) + ': ' + names.map(function(x){ var dt = detailText(x); return x + roleTag(x) + (dt ? ' [' + dt + ']' : ''); }).join(', '));
   });
   M.inns.forEach(function(inn, i){
     var st = replay(i);
@@ -1385,7 +1468,7 @@ function pdfSafe(s){
   var o = '';
   for(var k=0;k<s.length;k++){
     var c = s.charCodeAt(k);
-    if(c===9) o += ' '; else if(c<32) o += ''; else if(c>255) o += '?'; else o += s.charAt(k);
+    if(c===9) o += ' '; else if(c<32) o += ''; else if(c===0x2020) o += String.fromCharCode(134); else if(c>255) o += '?'; else o += s.charAt(k);
   }
   return o;
 }
@@ -1479,10 +1562,12 @@ function buildPDF(){
     d.line(batTeam(i) + '   ' + st.score + '/' + st.wkts + '   (' + fmtOv(st.balls) + ' overs)', 'F1', 11);
   });
   ['a','b'].forEach(function(side){
-    var list = squadList(side), r = squadRole(side);
-    if(!list.length && !r.tw) return;
-    d.gap(6); d.line(teamName(side) + ' squad', 'F2', 10);
-    wrapText(list.map(function(x){ return x + roleTag(x); }).join(', ') + (r.tw ? '. 12th man: ' + r.tw : ''), 96).forEach(function(l){ d.line(l, 'F3', 9); });
+    var r = squadRole(side), names = knownPlayers(side).slice();
+    if(r.tw) names.push(r.tw);
+    names = uniq(names);
+    if(!names.length) return;
+    d.ensure(44); d.gap(6); d.line(teamName(side) + ' squad', 'F2', 10);
+    names.forEach(function(x){ d.line(padR(x + roleTag(x), 30) + ' ' + detailText(x), 'F3', 9); });
   });
 
   M.inns.forEach(function(inn, i){
@@ -1555,6 +1640,7 @@ document.addEventListener('click', function(e){
   if(t.dataset.tab){ ui.tab = t.dataset.tab; render(); return; }
   if(t.dataset.inn!=null){ ui.cardInn = +t.dataset.inn; render(); return; }
   if(t.dataset.view){ ui.cardView = t.dataset.view; render(); return; }
+  if(t.dataset.p != null){ playerAction(t.dataset.p); return; }
   if(t.dataset.a){ act(t.dataset.a); return; }
   if(t.dataset.m){ matchAction(t.dataset.m); return; }
   if(t.dataset.h){ homeAction(t.dataset.h, t.dataset.id); }
