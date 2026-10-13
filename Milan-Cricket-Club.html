@@ -904,18 +904,24 @@ async function createMatch(){
     if(!/^[A-Za-z0-9]{4,12}$/.test(f.pin)){ toast('PIN: 4 to 12 letters or numbers, no spaces'); continue; }
     break;
   }
-  var mid = newMid();
+  var mid = newMid(), step = '';
   try{
+    step = 'admin key';
     await withTimeout(LIVE.fb.set(dbRef('adminClaims/' + LIVE.uid), adminKey), 10000);
+    step = 'match PIN (admin key check)';
     await withTimeout(LIVE.fb.set(dbRef('pins/' + mid), vals.pin), 10000);
+    step = 'PIN claim';
     await withTimeout(LIVE.fb.set(dbRef('claims/' + mid + '/' + LIVE.uid), vals.pin), 10000);
+    step = 'scorer role';
     await claimScorer(mid, vals.name);
+    step = 'match start time';
     await withTimeout(LIVE.fb.set(dbRef('matches/' + mid + '/created'), LIVE.fb.serverTimestamp()), 10000);
+    step = 'match settings';
     var setup = newMatch().setup;
     setup.a = vals.a; setup.b = vals.b; setup.batFirst = vals.batFirst; setup.overs = parseInt(vals.overs, 10);
     await withTimeout(LIVE.fb.set(dbRef('matches/' + mid + '/setup'), setup), 10000);
   }catch(err){
-    if(isPermission(err)) toast('Not allowed. The admin starting key is wrong or has been changed. Ask the admin for the starting link.');
+    if(isPermission(err)) toast('The database refused this step: ' + step + '. ' + (step === 'admin key' || step.indexOf('PIN (admin') === 0 ? 'Check the adminKey in Firebase matches your starting link, and that the new rules are published.' : 'Check the new rules are published in Firebase.'));
     else toast('Could not create the match: ' + ((err && err.message) || err));
     return;
   }
