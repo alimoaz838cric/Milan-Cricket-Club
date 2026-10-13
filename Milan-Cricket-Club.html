@@ -1,0 +1,1407 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Cricket Scorer Live</title>
+<meta name="theme-color" content="#1E6B3A">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Scorer">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%8F%8F%3C/text%3E%3C/svg%3E">
+<style>
+:root{
+  box-sizing:border-box;
+  padding-top:env(safe-area-inset-top,0px);
+  padding-bottom:env(safe-area-inset-bottom,0px);
+  --bg:#F2F4F0; --surface:#FFFFFF; --ink:#15202B; --muted:#5A6672; --line:#D5DBD3;
+  --green:#1E6B3A; --green-soft:#DCEBDF; --on-green:#FFFFFF;
+  --red:#B3261E; --red-soft:#F6DAD7; --amber:#9A5B00; --amber-soft:#F7E8CC;
+  --shadow:0 -6px 24px rgba(0,0,0,.18);
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0E1511; --surface:#17211A; --ink:#E9F0EA; --muted:#97A69C; --line:#2A392F;
+    --green:#3F9C5F; --green-soft:#1D3526; --on-green:#07130B;
+    --red:#E2605A; --red-soft:#3A1E1C; --amber:#E3AE4B; --amber-soft:#3A2D13;
+    --shadow:0 -6px 24px rgba(0,0,0,.6);
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0E1511; --surface:#17211A; --ink:#E9F0EA; --muted:#97A69C; --line:#2A392F;
+  --green:#3F9C5F; --green-soft:#1D3526; --on-green:#07130B;
+  --red:#E2605A; --red-soft:#3A1E1C; --amber:#E3AE4B; --amber-soft:#3A2D13;
+  --shadow:0 -6px 24px rgba(0,0,0,.6);
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html{height:100%;scroll-padding-top:env(safe-area-inset-top,0px)}
+body{height:100%;margin:0;background:var(--bg);color:var(--ink);
+  font:500 16px/1.35 system-ui,-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;
+  -webkit-text-size-adjust:100%;touch-action:manipulation}
+button{font:inherit;color:inherit}
+#app{height:100%;display:flex;flex-direction:column;max-width:600px;margin:0 auto}
+#view{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:12px 14px 16px}
+#pad{flex:none;padding:8px 10px;background:var(--surface);border-top:1px solid var(--line)}
+#pad:empty{display:none}
+.tabs{flex:none;display:grid;grid-template-columns:repeat(3,1fr);background:var(--surface);border-top:1px solid var(--line)}
+.tabs button{border:0;background:none;padding:13px 4px;font-weight:600;color:var(--muted);border-top:3px solid transparent}
+.tabs button[aria-selected="true"]{color:var(--green);border-top-color:var(--green)}
+.num{font-family:'Arial Narrow','Roboto Condensed','Helvetica Neue',Arial,system-ui,sans-serif;font-variant-numeric:tabular-nums}
+
+/* scoreboard */
+.board{background:var(--green);color:var(--on-green);border-radius:14px;padding:14px 16px}
+.board .who{display:flex;justify-content:space-between;align-items:baseline;font-weight:600;opacity:.92}
+.board .big{font-size:64px;line-height:1;font-weight:700;margin:6px 0 2px}
+.board .big small{font-size:34px;opacity:.85}
+.board .row{display:flex;gap:18px;flex-wrap:wrap;font-weight:600}
+.board .chase{margin-top:8px;padding-top:8px;border-top:1px solid rgba(255,255,255,.35);font-weight:600}
+
+.card{background:var(--surface);border:1px solid var(--line);border-radius:12px;margin-top:10px}
+.line{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;gap:10px}
+.line+.line{border-top:1px solid var(--line)}
+.line .nm{font-weight:600;font-size:18px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.line .nm i{font-style:normal;color:var(--green);margin-left:4px}
+.line .st{font-size:26px;font-weight:700;white-space:nowrap}
+.line .st small{font-size:17px;color:var(--muted);font-weight:600}
+.lbl{color:var(--muted);font-size:14px;font-weight:600}
+.over{display:flex;gap:6px;flex-wrap:wrap;padding:10px 14px}
+.ball{min-width:34px;height:34px;padding:0 6px;border-radius:17px;border:1.5px solid var(--line);display:grid;place-items:center;font-weight:700;font-size:15px}
+.ball.b4,.ball.b6{background:var(--green);color:var(--on-green);border-color:var(--green)}
+.ball.w{background:var(--red);color:#fff;border-color:var(--red)}
+.ball.x{background:var(--amber-soft);color:var(--amber);border-color:var(--amber)}
+.banner{margin-top:10px;border-radius:12px;padding:12px 14px;background:var(--amber-soft);color:var(--ink);border:1px solid var(--amber)}
+.banner b{display:block;margin-bottom:6px}
+.start{padding:28px 6px;text-align:center}
+.start h1{font-size:30px;margin:0 0 6px;line-height:1.1}
+.start p{color:var(--muted);margin:0 0 20px}
+
+.btn{border:0;border-radius:12px;padding:14px 18px;font-weight:700;background:var(--green);color:var(--on-green);font-size:17px;min-height:50px}
+.btn.alt{background:var(--surface);color:var(--ink);border:1.5px solid var(--line)}
+.btn.red{background:var(--red);color:#fff}
+.btn.full{width:100%}
+
+/* keypad */
+.pad{display:grid;grid-template-columns:repeat(4,1fr);gap:7px}
+.k{border:1.5px solid var(--line);background:var(--surface);border-radius:12px;height:56px;font-weight:700;font-size:28px;
+  font-family:'Arial Narrow','Roboto Condensed','Helvetica Neue',Arial,system-ui,sans-serif;touch-action:manipulation}
+.k:active{transform:scale(.96)}
+.k.g{background:var(--green);color:var(--on-green);border-color:var(--green)}
+.k.r{background:var(--red);color:#fff;border-color:var(--red)}
+.k.e{font-family:system-ui,sans-serif;font-size:17px;color:var(--amber);border-color:var(--amber);background:var(--amber-soft)}
+.k.s{font-family:system-ui,sans-serif;font-size:15px;color:var(--muted);height:44px}
+.k.span2{grid-column:span 2}
+
+/* sheets */
+.overlay{position:fixed;inset:0;background:rgba(10,15,12,.55);display:flex;align-items:flex-end;justify-content:center;z-index:20}
+.sheet{width:100%;max-width:600px;max-height:88%;overflow:auto;background:var(--surface);border-radius:18px 18px 0 0;
+  padding:16px 14px calc(16px + env(safe-area-inset-bottom,0px));box-shadow:var(--shadow)}
+.sheet h2{margin:0 0 4px;font-size:21px}
+.sheet .sub{color:var(--muted);margin:0 0 12px}
+.grid{display:grid;grid-template-columns:repeat(var(--c,3),1fr);gap:8px;margin:8px 0}
+.grid .h{grid-column:1/-1;color:var(--muted);font-weight:600;font-size:14px;margin-top:6px}
+.opt{border:1.5px solid var(--line);background:var(--surface);border-radius:12px;padding:13px 8px;font-weight:600;min-height:50px;font-size:17px}
+.opt:active{background:var(--green-soft)}
+.chip{border:1.5px solid var(--line);background:var(--bg);border-radius:20px;padding:9px 14px;font-weight:600}
+.chips{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}
+input[type=text],input[type=number],select,textarea{width:100%;font:inherit;font-size:18px;padding:12px;border-radius:10px;
+  border:1.5px solid var(--line);background:var(--bg);color:var(--ink)}
+textarea{font-size:14px;min-height:140px}
+.acts{display:flex;gap:8px;margin-top:12px}
+.acts .btn{flex:1}
+.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(90px + env(safe-area-inset-bottom,0px));background:var(--ink);color:var(--bg);
+  padding:10px 16px;border-radius:20px;z-index:30;font-weight:600;max-width:90%}
+
+/* scorecard tables */
+.seg{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:10px}
+.seg button{border:1.5px solid var(--line);background:var(--surface);border-radius:10px;padding:10px;font-weight:600}
+.seg button[aria-pressed="true"]{background:var(--green);color:var(--on-green);border-color:var(--green)}
+.tw{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}
+th,td{padding:8px 6px;text-align:right;white-space:nowrap}
+th:first-child,td:first-child{text-align:left;white-space:normal}
+th{font-size:13px;color:var(--muted);font-weight:600;border-bottom:1.5px solid var(--line)}
+td{border-bottom:1px solid var(--line)}
+td .how{display:block;color:var(--muted);font-size:13px}
+.h3{margin:16px 0 6px;font-size:17px;font-weight:700;color:var(--green)}
+.tot td{font-weight:700;border-bottom:0}
+#bar{flex:none;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 14px;font-weight:600;font-size:15px;background:var(--surface);border-bottom:1px solid var(--line);min-height:44px}
+#bar.me{background:var(--green);color:var(--on-green)}
+#bar.off{background:var(--red);color:#fff}
+#bar.none,#bar.stale{background:var(--amber-soft);color:var(--ink)}
+#bar button{border:1.5px solid currentColor;background:transparent;border-radius:10px;padding:6px 12px;font-weight:700;white-space:nowrap}
+.mono{font-family:ui-monospace,Menlo,Consolas,monospace}
+.lg .nm{white-space:normal}
+.fow{margin:0;padding:0;list-style:none;color:var(--ink)}
+.fow li{padding:5px 0;border-bottom:1px solid var(--line)}
+.field{margin:10px 0}
+.field label{display:block;color:var(--muted);font-weight:600;font-size:14px;margin-bottom:4px}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.res{font-size:20px;font-weight:700;margin:6px 0 14px}
+@media (prefers-reduced-motion: reduce){*{transition:none!important;animation:none!important}}
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="bar"></div>
+  <div id="view"></div>
+  <div id="pad"></div>
+  <nav class="tabs" role="tablist">
+    <button role="tab" data-tab="score">Score</button>
+    <button role="tab" data-tab="card">Scorecard</button>
+    <button role="tab" data-tab="match">Match</button>
+  </nav>
+</div>
+
+<script>
+/* ========================================================================
+   CLUB SETTINGS - the club admin edits this block ONCE (see SETUP-GUIDE.txt)
+   Paste the values from Firebase: Project settings > Your apps > SDK setup.
+   These values are safe to be public. The database rules protect the data.
+   ======================================================================== */
+var FIREBASE_CONFIG = {
+  apiKey: "AIzaSyDpLkCyoe-pHX4OzBUZBXRgGRecygyYQIg",
+  authDomain: "milan-cricket-club.firebaseapp.com",
+  databaseURL: "https://milan-cricket-club-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "milan-cricket-club"
+};
+/* ============================ ENGINE START ============================ */
+var M;
+var CREDIT = ['bowled','caught','lbw','stumped','hitwicket'];
+function same(a,b){ return String(a||'').trim().toLowerCase() === String(b||'').trim().toLowerCase(); }
+function fmtOv(b){ return Math.floor(b/6) + '.' + (b%6); }
+function newMatch(){
+  return {v:1, setup:{title:'', a:'Team A', b:'Team B', batFirst:'a', overs:30, maxWkts:10, maxBowlerOvers:6}, inns:[]};
+}
+function teamName(side){ return side==='a' ? M.setup.a : M.setup.b; }
+function battingSide(i){ return i===0 ? M.setup.batFirst : (M.setup.batFirst==='a' ? 'b' : 'a'); }
+function batTeam(i){ return teamName(battingSide(i)); }
+function bowlTeam(i){ return teamName(battingSide(i)==='a' ? 'b' : 'a'); }
+
+function howOut(w, bowler){
+  var f = w.fielder || '?';
+  switch(w.type){
+    case 'bowled': return 'b ' + bowler;
+    case 'caught': return same(f,bowler) ? 'c & b ' + bowler : 'c ' + f + ' b ' + bowler;
+    case 'lbw': return 'lbw b ' + bowler;
+    case 'runout': return 'run out (' + f + ')';
+    case 'stumped': return 'st ' + f + ' b ' + bowler;
+    case 'hitwicket': return 'hit wicket b ' + bowler;
+    default: return w.desc || 'out';
+  }
+}
+
+function describeBall(ev, w, outName, bw){
+  var p = [];
+  if(w){
+    var s = 'OUT: ' + outName + ', ' + howOut(w, bw);
+    if(ev.wd) s += ' (wide)'; if(ev.nb) s += ' (no ball)';
+    if(ev.bat) s += ', ' + ev.bat + ' run' + (ev.bat===1?'':'s') + ' completed';
+    return s;
+  }
+  if(ev.wd){ return 'Wide' + (ev.wd>1 ? ', ' + (ev.wd-1) + ' extra run' + (ev.wd-1===1?'':'s') : ''); }
+  if(ev.nb){
+    p.push('No ball');
+    if(ev.bat) p.push(ev.bat + ' off the bat');
+    if(ev.bye) p.push(ev.bye + ' bye' + (ev.bye===1?'':'s'));
+    if(ev.lb) p.push(ev.lb + ' leg bye' + (ev.lb===1?'':'s'));
+    return p.join(', ');
+  }
+  if(ev.kind==='bye') return ev.bye ? ev.bye + ' bye' + (ev.bye===1?'':'s') : 'No run (bye)';
+  if(ev.kind==='lb') return ev.lb ? ev.lb + ' leg bye' + (ev.lb===1?'':'s') : 'No run (leg bye)';
+  if(ev.bat===0) return 'Dot ball';
+  if(ev.bat===4) return 'FOUR';
+  if(ev.bat===6) return 'SIX';
+  return ev.bat + ' run' + (ev.bat===1?'':'s');
+}
+
+/* Rebuild the full state of an innings from its event list. */
+function replay(i){
+  var S = M.setup, evs = (M.inns[i] || {events:[]}).events;
+  var st = {started:false, score:0, wkts:0, balls:0, overs:0, lio:0, overRuns:0, striker:'', non:'', bowler:'',
+    lastBowler:'', needBowler:false, batters:[], bowlers:[], extras:{wd:0,nb:0,b:0,lb:0}, fow:[], parts:[],
+    lastFall:0, thisOver:[], done:false, doneReason:'', target:0, events:evs, log:[]};
+  if(i===1 && M.inns[0]) st.target = replay(0).score + 1;
+  function getBat(n){ for(var k=0;k<st.batters.length;k++){ if(same(st.batters[k].name,n)) return st.batters[k]; } return null; }
+  function addBat(n){ if(!n) return; if(!getBat(n)) st.batters.push({name:n,runs:0,balls:0,fours:0,sixes:0,how:'not out',out:false}); }
+  function getBowl(n){
+    for(var k=0;k<st.bowlers.length;k++){ if(same(st.bowlers[k].name,n)) return st.bowlers[k]; }
+    var b = {name:n,balls:0,runs:0,wkts:0,maidens:0,wd:0,nb:0}; st.bowlers.push(b); return b;
+  }
+  function rr(n){ return (n===4||n===6) ? 0 : n; }
+  for(var e=0;e<evs.length;e++){
+    var ev = evs[e];
+    if(st.done) break;
+    if(ev.t==='start'){
+      st.started = true; st.striker = ev.striker; st.non = ev.non; st.bowler = ev.bowler;
+      addBat(ev.striker); addBat(ev.non); getBowl(ev.bowler);
+    } else if(ev.t==='bowler'){
+      if(st.needBowler){ st.needBowler = false; st.thisOver = []; }
+      else if(st.lio>0){ st.overRuns += 100; }
+      st.log.push({note:'New bowler: ' + ev.name});
+      st.bowler = ev.name; getBowl(ev.name);
+    } else if(ev.t==='swap'){
+      var t0 = st.striker; st.striker = st.non; st.non = t0;
+      st.log.push({note:'Strike swapped manually'});
+    } else if(ev.t==='retire'){
+      var outR = ev.out==='N' ? st.non : st.striker;
+      var rb = getBat(outR); if(rb){ rb.how = 'retired hurt'; }
+      st.log.push({note:outR + ' retired hurt, ' + (ev.newBatter||'?') + ' comes in'});
+      if(ev.newBatter){ addBat(ev.newBatter); if(same(st.striker,outR)) st.striker = ev.newBatter; else st.non = ev.newBatter; }
+    } else if(ev.t==='end'){
+      st.done = true; st.doneReason = 'Innings closed';
+    } else if(ev.t==='ball'){
+      var legal = !ev.wd && !ev.nb, faced = !ev.wd;
+      var total = ev.bat + ev.wd + ev.nb + ev.bye + ev.lb;
+      var bRuns = ev.bat + ev.wd + ev.nb;
+      var run = rr(ev.bat) + rr(ev.bye) + rr(ev.lb) + (ev.wd>1 ? rr(ev.wd-1) : 0);
+      var w = ev.w || null;
+      var crossed = (run%2===1) || !!(w && w.crossed);
+      var s0 = st.striker, n0 = st.non, bw = st.bowler;
+      var sb = getBat(s0); sb.runs += ev.bat; if(faced) sb.balls++; if(ev.bat===4) sb.fours++; if(ev.bat===6) sb.sixes++;
+      var bo = getBowl(bw); if(legal) bo.balls++; bo.runs += bRuns; bo.wd += ev.wd; bo.nb += ev.nb;
+      st.extras.wd += ev.wd; st.extras.nb += ev.nb; st.extras.b += ev.bye; st.extras.lb += ev.lb;
+      st.score += total; if(legal) st.balls++;
+      var s = s0, n = n0, tmp;
+      if(crossed){ tmp = s; s = n; n = tmp; }
+      var overLbl = st.overs + '.' + (st.lio+1);
+      if(w){
+        var out = w.out==='N' ? n0 : s0;
+        var ob = getBat(out); ob.how = howOut(w,bw); ob.out = true;
+        st.wkts++;
+        if(CREDIT.indexOf(w.type)>=0) bo.wkts++;
+        st.fow.push({n:st.wkts, score:st.score, name:out, over:overLbl});
+        st.parts.push({a:s0, b:n0, runs:st.score - st.lastFall}); st.lastFall = st.score;
+        if(ev.newBatter){ addBat(ev.newBatter); if(same(s,out)) s = ev.newBatter; else n = ev.newBatter; }
+        else { if(same(s,out)) s = ''; else n = ''; }
+      }
+      if(legal) st.lio++;
+      st.overRuns += bRuns; st.thisOver.push(ev.label);
+      var overEnded = false;
+      if(st.lio>=6){
+        overEnded = true;
+        if(st.overRuns===0) bo.maidens++;
+        tmp = s; s = n; n = tmp;
+        st.overs++; st.lio = 0; st.overRuns = 0; st.lastBowler = bw;
+      }
+      st.striker = s; st.non = n;
+      if(st.wkts >= S.maxWkts){ st.done = true; st.doneReason = 'All out'; }
+      else if(st.overs >= S.overs){ st.done = true; st.doneReason = 'Overs complete'; }
+      else if(i===1 && st.score >= st.target){ st.done = true; st.doneReason = 'Target reached'; }
+      st.needBowler = overEnded && !st.done;
+      st.log.push({over:overLbl, bowler:bw, striker:s0, label:ev.label, total:total, score:st.score, wkts:st.wkts,
+        text:describeBall(ev, w, w ? (w.out==='N' ? n0 : s0) : '', bw)});
+    }
+  }
+  return st;
+}
+function matchResult(){
+  if(M.inns.length<2) return null;
+  var a = replay(0), b = replay(1);
+  if(!b.done) return null;
+  if(b.score > a.score) return batTeam(1) + ' won by ' + (M.setup.maxWkts - b.wkts) + ' wicket' + ((M.setup.maxWkts-b.wkts)===1?'':'s');
+  if(b.score < a.score) return batTeam(0) + ' won by ' + (a.score - b.score) + ' run' + ((a.score-b.score)===1?'':'s');
+  return 'Match tied';
+}
+/* ============================= ENGINE END ============================= */
+
+/* ------------------------------ storage ------------------------------ */
+/* The match lives in the shared database. Only small personal settings are kept on the phone. */
+var LS_NAME = 'cricket-live-name', LS_RECENT = 'cricket-live-recent';
+function lsGet(k){ try{ return localStorage.getItem(k); }catch(e){ return null; } }
+function lsSet(k, v){ try{ localStorage.setItem(k, v); }catch(e){} }
+M = newMatch();
+/* ------------------------------ helpers ------------------------------ */
+function $(s){ return document.querySelector(s); }
+function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
+function uniq(arr){ var out=[]; arr.forEach(function(x){ if(x && !out.some(function(y){ return same(x,y); })) out.push(x); }); return out; }
+function allNames(){
+  var n = [];
+  M.inns.forEach(function(inn){ inn.events.forEach(function(ev){
+    ['striker','non','bowler','name','newBatter'].forEach(function(f){ if(ev[f]) n.push(ev[f]); });
+    if(ev.w && ev.w.fielder) n.push(ev.w.fielder);
+  }); });
+  return uniq(n);
+}
+function canon(name){
+  name = String(name||'').replace(/\s+/g,' ').trim();
+  var k = allNames();
+  for(var j=0;j<k.length;j++){ if(same(k[j],name)) return k[j]; }
+  return name;
+}
+function toast(msg){
+  var t = document.createElement('div'); t.className = 'toast'; t.textContent = msg; document.body.appendChild(t);
+  setTimeout(function(){ t.remove(); }, 2600);
+}
+function buzz(){ try{ if(navigator.vibrate) navigator.vibrate(12); }catch(e){} }
+function curIdx(){ return M.inns.length - 1; }
+
+/* names for quick-pick chips */
+function batChips(i){
+  var st = M.inns[i] ? replay(i) : null, other = [];
+  if(i===1 && M.inns[0]) other = replay(0).bowlers.map(function(b){ return b.name; });
+  var onCard = st ? st.batters.map(function(b){ return b.name; }) : [];
+  return other.filter(function(x){ return !onCard.some(function(y){ return same(x,y); }); });
+}
+function bowlChips(i){
+  var mine = M.inns[i] ? replay(i).bowlers.map(function(b){ return b.name; }) : [];
+  var other = [];
+  if(i===1 && M.inns[0]) other = replay(0).batters.map(function(b){ return b.name; });
+  return uniq(mine.concat(other));
+}
+function fieldChips(i){ return bowlChips(i); }
+
+/* ------------------------------ sheets ------------------------------- */
+function sheet(build){
+  return new Promise(function(res){
+    var ov = document.createElement('div'); ov.className = 'overlay';
+    var sh = document.createElement('div'); sh.className = 'sheet'; ov.appendChild(sh);
+    function close(v){ ov.remove(); res(v); }
+    build(sh, close);
+    ov.addEventListener('click', function(e){ if(e.target===ov) close(null); });
+    document.body.appendChild(ov);
+  });
+}
+/* options: [{l,v}] or [{h:'heading'}] */
+function choose(title, options, o){
+  o = o || {};
+  return sheet(function(sh, close){
+    var html = '<h2>' + esc(title) + '</h2>' + (o.sub ? '<p class="sub">' + esc(o.sub) + '</p>' : '') + '<div class="grid" style="--c:' + (o.cols||2) + '">';
+    options.forEach(function(x, k){
+      if(x.h) html += '<div class="h">' + esc(x.h) + '</div>';
+      else html += '<button class="opt" data-k="' + k + '">' + esc(x.l) + '</button>';
+    });
+    html += '</div><div class="acts"><button class="btn alt" data-c="1">Cancel</button></div>';
+    sh.innerHTML = html;
+    sh.addEventListener('click', function(e){
+      var b = e.target.closest('button'); if(!b) return;
+      if(b.dataset.c) close(null);
+      else if(b.dataset.k!=null) close(options[+b.dataset.k].v);
+    });
+  });
+}
+function yesno(title, msg, yes){
+  return sheet(function(sh, close){
+    sh.innerHTML = '<h2>' + esc(title) + '</h2><p class="sub">' + esc(msg) + '</p><div class="acts"><button class="btn alt" data-v="0">No</button><button class="btn" data-v="1">' + esc(yes||'Yes') + '</button></div>';
+    sh.addEventListener('click', function(e){ var b = e.target.closest('button'); if(b) close(b.dataset.v==='1'); });
+  }).then(function(v){ return !!v; });
+}
+function info(title, msg){
+  return sheet(function(sh, close){
+    sh.innerHTML = '<h2>' + esc(title) + '</h2><p class="sub" style="white-space:pre-line">' + esc(msg) + '</p><div class="acts"><button class="btn">OK</button></div>';
+    sh.querySelector('.btn').addEventListener('click', function(){ close(true); });
+  });
+}
+/* text prompt; returns string, '' (skipped) or null (cancelled) */
+function ask(o){
+  return sheet(function(sh, close){
+    var chips = (o.chips||[]).map(function(c){ return '<button class="chip" data-chip="' + esc(c) + '">' + esc(c) + '</button>'; }).join('');
+    sh.innerHTML = '<h2>' + esc(o.title) + '</h2>' + (o.sub ? '<p class="sub">' + esc(o.sub) + '</p>' : '') +
+      '<input type="text" id="askin" autocomplete="off" autocapitalize="words" placeholder="' + esc(o.ph||'Number or name') + '">' +
+      (chips ? '<div class="chips">' + chips + '</div>' : '') +
+      '<div class="acts"><button class="btn alt" data-x="c">Cancel</button>' + (o.optional ? '<button class="btn alt" data-x="s">Skip</button>' : '') + '<button class="btn" data-x="ok">OK</button></div>';
+    var inp = sh.querySelector('#askin');
+    function submit(){ var v = inp.value.trim(); if(!v && !o.optional){ toast('Type a name or number'); return; } close(v); }
+    sh.addEventListener('click', function(e){
+      var b = e.target.closest('button'); if(!b) return;
+      if(b.dataset.chip){ close(b.dataset.chip); return; }
+      if(b.dataset.x==='c') close(null);
+      else if(b.dataset.x==='s') close('');
+      else if(b.dataset.x==='ok') submit();
+    });
+    inp.addEventListener('keydown', function(e){ if(e.key==='Enter') submit(); });
+    setTimeout(function(){ try{ inp.focus(); }catch(e){} }, 60);
+  });
+}
+/* simple multi-field form; returns {key:value} or null */
+function form(title, sub, fields, okLabel){
+  return sheet(function(sh, close){
+    var html = '<h2>' + esc(title) + '</h2>' + (sub ? '<p class="sub">' + esc(sub) + '</p>' : '');
+    fields.forEach(function(f, k){
+      html += '<div class="field"><label>' + esc(f.label) + '</label>';
+      if(f.type==='select'){
+        html += '<select data-f="' + k + '">' + f.options.map(function(o){ return '<option value="' + esc(o.v) + '"' + (String(o.v)===String(f.value) ? ' selected' : '') + '>' + esc(o.l) + '</option>'; }).join('') + '</select>';
+      } else {
+        html += '<input type="text"' + (f.type==='number' ? ' inputmode="numeric"' : '') + ' autocomplete="off" data-f="' + k + '" value="' + esc(f.value==null ? '' : f.value) + '" placeholder="' + esc(f.ph || '') + '">';
+      }
+      html += '</div>';
+    });
+    html += '<div class="acts"><button class="btn alt" data-x="c">Cancel</button><button class="btn" data-x="ok">' + esc(okLabel || 'OK') + '</button></div>';
+    sh.innerHTML = html;
+    sh.addEventListener('click', function(e){
+      var b = e.target.closest('button'); if(!b) return;
+      if(b.dataset.x==='c') close(null);
+      else if(b.dataset.x==='ok'){
+        var out = {};
+        fields.forEach(function(f, k){ out[f.k] = String(sh.querySelector('[data-f="' + k + '"]').value).trim(); });
+        close(out);
+      }
+    });
+  });
+}
+function copyText(t){
+  function fallback(){
+    var ta = document.createElement('textarea'); ta.value = t; ta.style.cssText = 'position:fixed;opacity:0;top:0';
+    document.body.appendChild(ta); ta.select(); var ok = false;
+    try{ ok = document.execCommand('copy'); }catch(e){}
+    ta.remove(); return ok;
+  }
+  try{
+    if(navigator.clipboard && navigator.clipboard.writeText) return navigator.clipboard.writeText(t).then(function(){ return true; }, function(){ return fallback(); });
+  }catch(e){}
+  return Promise.resolve(fallback());
+}
+function textBox(title, text, restore){
+  return sheet(function(sh, close){
+    sh.innerHTML = '<h2>' + esc(title) + '</h2>' +
+      '<textarea id="tb" ' + (restore ? 'placeholder="Paste backup text here"' : 'readonly') + '>' + esc(text||'') + '</textarea>' +
+      '<div class="acts"><button class="btn alt" data-x="c">Close</button>' +
+      (restore ? '<button class="btn" data-x="r">Restore</button>' : '<button class="btn" data-x="cp">Copy</button>') + '</div>';
+    var ta = sh.querySelector('#tb');
+    sh.addEventListener('click', function(e){
+      var b = e.target.closest('button'); if(!b) return;
+      if(b.dataset.x==='c') close(null);
+      else if(b.dataset.x==='cp'){ copyText(ta.value).then(function(ok){ if(ok) toast('Copied'); else { ta.select(); toast('Select the text and copy it'); } }); }
+      else if(b.dataset.x==='r') close(ta.value);
+    });
+  });
+}
+
+/* ---------------------------- scoring flow --------------------------- */
+function ready(){
+  var i = curIdx(); if(i<0) return false;
+  if(!isScorer()){ toast('Only the scorer can do that'); return false; }
+  var st = replay(i);
+  return st.started && !st.done && !st.needBowler;
+}
+async function commit(ev){
+  var i = curIdx();
+  try{ await appendEvent(ev, i); }
+  catch(err){ writeError(err); return; }
+  buzz(); render();
+  await afterChange();
+}
+async function afterChange(){
+  var i = curIdx(); if(i<0) return;
+  var st = replay(i);
+  if(st.done){ render(); await announceDone(i, st); }
+  else if(st.needBowler){ await pickBowler(false); }
+}
+async function announceDone(i, st){
+  var msg = batTeam(i) + ' ' + st.score + '/' + st.wkts + ' (' + fmtOv(st.balls) + ' overs)';
+  if(i===0){
+    await info('Innings 1 complete', st.doneReason + '\n' + msg + '\nTarget: ' + (st.score+1) + '\n\nOpen the Score tab and start innings 2.');
+  } else {
+    await sheet(function(sh, close){
+      sh.innerHTML = '<h2>Match complete</h2><p class="sub" style="white-space:pre-line">' + esc(msg + '\n\n' + (matchResult() || st.doneReason)) + '</p>' +
+        '<div class="acts"><button class="btn alt" data-v="0">Close</button><button class="btn" data-v="1">Download PDF</button></div>';
+      sh.addEventListener('click', function(e){
+        var b = e.target.closest('button'); if(!b) return;
+        if(b.dataset.v==='1') downloadPDF();
+        close(true);
+      });
+    });
+  }
+}
+async function pickBowler(mid){
+  var i = curIdx(), st = replay(i);
+  for(;;){
+    var nm = await ask({
+      title: mid ? 'Change bowler' : 'Next bowler',
+      sub: mid ? 'Replacement for ' + st.bowler + '. A maiden will not be credited for this over.' : 'Over ' + st.overs + ' complete. Last over: ' + st.bowler,
+      chips: bowlChips(i).filter(function(x){ return !same(x, st.bowler); })
+    });
+    if(!nm) return false;
+    var name = canon(nm);
+    if(!mid && same(name, st.bowler)){
+      if(!(await yesno('Same bowler', name + ' bowled the previous over. Use him anyway?'))) continue;
+    }
+    var lim = M.setup.maxBowlerOvers, bo = st.bowlers.filter(function(b){ return same(b.name,name); })[0];
+    if(lim>0 && bo && bo.balls >= lim*6){
+      if(!(await yesno('Over limit', name + ' has bowled ' + Math.floor(bo.balls/6) + ' over(s); the limit is ' + lim + '. Allow anyway?'))) continue;
+    }
+    try{ await appendEvent({t:'bowler', name:name}, i); }
+    catch(err){ writeError(err); return false; }
+    render();
+    return true;
+  }
+}
+async function newBatterPrompt(i, st, outName, retired){
+  for(;;){
+    var nm = await ask({
+      title: 'New batter',
+      sub: retired ? outName + ' retires.' : 'Wicket! ' + outName + ' is out.',
+      chips: batChips(i)
+    });
+    if(nm===null) return null;
+    var name = canon(nm);
+    if(st.batters.some(function(b){ return same(b.name,name); })){ toast(name + ' is already on this innings'); continue; }
+    return name;
+  }
+}
+async function startInnings(){
+  var idx = M.inns.length;
+  if(idx>=2) return;
+  if(idx===1 && !replay(0).done) return;
+  var sub = batTeam(idx) + ' batting, innings ' + (idx+1);
+  var s = await ask({title:'Opening striker', sub:sub, chips:batChips(idx)}); if(!s) return;
+  s = canon(s);
+  var n = await ask({title:'Opening non-striker', sub:sub, chips:batChips(idx).filter(function(x){ return !same(x,s); })}); if(!n) return;
+  n = canon(n);
+  if(same(s,n)){ toast('Striker and non-striker must be different'); return; }
+  var b = await ask({title:'Opening bowler', sub:bowlTeam(idx) + ' bowling', chips:idx===1 ? replay(0).batters.map(function(x){ return x.name; }) : []}); if(!b) return;
+  try{ await appendEvent({t:'start', striker:s, non:n, bowler:canon(b)}, idx); }
+  catch(err){ writeError(err); return; }
+  render();
+}
+function runs(n){
+  if(!ready()) return;
+  return commit({t:'ball', bat:n, wd:0, nb:0, bye:0, lb:0, label:String(n)});
+}
+async function wide(){
+  if(!ready()) return;
+  var x = await choose('Wide', [{l:'Wide only',v:0},{l:'+1',v:1},{l:'+2',v:2},{l:'+3',v:3},{l:'+4 (boundary)',v:4},{l:'+5',v:5}], {sub:'1 run is added automatically. Extra runs run:', cols:3});
+  if(x===null) return;
+  return commit({t:'ball', bat:0, wd:1+x, nb:0, bye:0, lb:0, label: x ? 'Wd+'+x : 'Wd'});
+}
+async function noball(){
+  if(!ready()) return;
+  var opts = [{h:'Runs off the bat'}], k;
+  for(k=0;k<=6;k++) opts.push({l:String(k), v:'bat:'+k});
+  opts.push({h:'Byes'}); for(k=1;k<=4;k++) opts.push({l:'Bye '+k, v:'bye:'+k});
+  opts.push({h:'Leg byes'}); for(k=1;k<=4;k++) opts.push({l:'Leg bye '+k, v:'lb:'+k});
+  var x = await choose('No ball', opts, {sub:'1 run is added automatically.', cols:4});
+  if(x===null) return;
+  var p = x.split(':'), n = +p[1], ev = {t:'ball', bat:0, wd:0, nb:1, bye:0, lb:0, label:'Nb'};
+  if(p[0]==='bat'){ ev.bat = n; if(n) ev.label = 'Nb+'+n; }
+  else if(p[0]==='bye'){ ev.bye = n; ev.label = 'Nb+B'+n; }
+  else { ev.lb = n; ev.label = 'Nb+L'+n; }
+  return commit(ev);
+}
+async function byes(kind){
+  if(!ready()) return;
+  var opts = [1,2,3,4,5,6].map(function(x){ return {l:String(x), v:x}; });
+  var x = await choose(kind==='bye' ? 'Byes' : 'Leg byes', opts, {sub:'How many runs?', cols:3});
+  if(x===null) return;
+  var ev = {t:'ball', bat:0, wd:0, nb:0, bye:0, lb:0, kind:kind};
+  if(kind==='bye'){ ev.bye = x; ev.label = 'B'+x; } else { ev.lb = x; ev.label = 'Lb'+x; }
+  return commit(ev);
+}
+async function wicket(){
+  if(!ready()) return;
+  var i = curIdx(), st = replay(i);
+  var type = await choose('How out?', [
+    {l:'Bowled',v:'bowled'},{l:'Caught',v:'caught'},{l:'LBW',v:'lbw'},{l:'Run out',v:'runout'},
+    {l:'Stumped',v:'stumped'},{l:'Hit wicket',v:'hitwicket'},{l:'Other',v:'other'}], {cols:2});
+  if(!type) return;
+  var w = {type:type, out:'S'}, ev = {t:'ball', bat:0, wd:0, nb:0, bye:0, lb:0, w:w, label:'W'}, f, c, who;
+  var fch = fieldChips(i);
+  if(type==='caught'){
+    f = await ask({title:'Caught by', chips:fch, optional:true}); if(f===null) return;
+    w.fielder = f ? canon(f) : '';
+    c = await choose('Did the batters cross before the catch?', [{l:'No',v:0},{l:'Yes',v:1}]); if(c===null) return;
+    w.crossed = !!c;
+  } else if(type==='runout'){
+    who = await choose('Who is out?', [{l:st.striker + ' (on strike)', v:'S'},{l:st.non + ' (non-striker)', v:'N'}], {cols:1}); if(who===null) return;
+    w.out = who;
+    var rd = await choose('Runs completed before the run out', [0,1,2,3,4,5].map(function(x){ return {l:String(x), v:x}; }), {cols:6}); if(rd===null) return;
+    var dt = await choose('Type of delivery', [{l:'Normal',v:'n'},{l:'Wide',v:'wd'},{l:'No ball',v:'nb'},{l:'Bye',v:'b'},{l:'Leg bye',v:'lb'}], {cols:2}); if(dt===null) return;
+    if(dt==='n') ev.bat = rd; else if(dt==='wd') ev.wd = 1+rd; else if(dt==='nb'){ ev.nb = 1; ev.bat = rd; } else if(dt==='b') ev.bye = rd; else ev.lb = rd;
+    f = await ask({title:'Fielder who broke the wicket', chips:fch, optional:true}); if(f===null) return;
+    w.fielder = f ? canon(f) : '';
+  } else if(type==='stumped'){
+    f = await ask({title:'Wicket-keeper', chips:fch, optional:true}); if(f===null) return;
+    w.fielder = f ? canon(f) : '';
+    c = await choose('Was it a wide?', [{l:'No',v:0},{l:'Yes',v:1}]); if(c===null) return;
+    if(c) ev.wd = 1;
+  } else if(type==='other'){
+    var d = await ask({title:'What happened?', sub:'e.g. obstructing the field, handled the ball, timed out', ph:'Description'}); if(!d) return;
+    w.desc = d;
+    who = await choose('Who is out?', [{l:st.striker + ' (on strike)', v:'S'},{l:st.non + ' (non-striker)', v:'N'}], {cols:1}); if(who===null) return;
+    w.out = who;
+  }
+  if(ev.wd) ev.label = 'Wd+W'; else if(ev.nb) ev.label = 'Nb+W';
+  var outName = w.out==='N' ? st.non : st.striker;
+  if(!(await yesno('Confirm wicket', outName + '\n' + howOut(w, st.bowler), 'Out'))) return;
+  if(st.wkts + 1 < M.setup.maxWkts){
+    var nb = await newBatterPrompt(i, st, outName, false); if(nb===null) return;
+    ev.newBatter = nb;
+  }
+  return commit(ev);
+}
+async function retire(){
+  if(!ready()) return;
+  var i = curIdx(), st = replay(i);
+  var who = await choose('Retire which batter?', [{l:st.striker + ' (on strike)', v:'S'},{l:st.non + ' (non-striker)', v:'N'}], {cols:1}); if(who===null) return;
+  var outName = who==='N' ? st.non : st.striker;
+  var nb = await newBatterPrompt(i, st, outName, true); if(nb===null) return;
+  try{ await appendEvent({t:'retire', out:who, newBatter:nb}, i); }
+  catch(err){ writeError(err); return; }
+  render();
+}
+async function undo(){
+  var i = curIdx(); if(i<0) return;
+  var last = LIVE.events[LIVE.events.length-1];
+  if(!last || (last.inn||0)!==i){ toast('Nothing to undo'); return; }
+  var what = last.t==='start' ? 'the start of this innings' : last.t==='ball' ? 'the last ball (' + last.label + ')' : last.t==='bowler' ? 'the last bowler change' : last.t==='swap' ? 'the strike swap' : last.t==='retire' ? 'the retirement' : 'closing the innings';
+  if(!(await yesno('Undo', 'Remove ' + what + '?', 'Undo'))) return;
+  try{ await removeLastEvent(); }
+  catch(err){ writeError(err); return; }
+  render();
+}
+async function swapStrike(){
+  if(!ready()) return;
+  try{ await appendEvent({t:'swap'}, curIdx()); }
+  catch(err){ writeError(err); return; }
+  render();
+}
+async function changeBowler(){
+  if(!ready()) return;
+  await pickBowler(true);
+}
+async function renamePlayer(){
+  var names = allNames();
+  var oldN = await ask({title:'Rename player', sub:'Pick or type the name to change', chips:names}); if(!oldN) return;
+  var newN = await ask({title:'New name for ' + oldN}); if(!newN) return;
+  newN = newN.replace(/\s+/g,' ').trim();
+  var upd = {};
+  LIVE.events.forEach(function(ev, n){
+    var c = JSON.parse(JSON.stringify(ev)), ch = false;
+    ['striker','non','bowler','name','newBatter'].forEach(function(f){ if(same(c[f],oldN)){ c[f] = newN; ch = true; } });
+    if(c.w && same(c.w.fielder,oldN)){ c.w.fielder = newN; ch = true; }
+    if(ch) upd[n] = c;
+  });
+  if(!Object.keys(upd).length){ toast('That name was not found'); return; }
+  try{ await LIVE.fb.update(LIVE.fb.ref(LIVE.db, 'matches/' + LIVE.mid + '/events'), upd); toast('Renamed'); }
+  catch(err){ writeError(err); }
+}
+async function endInnings(){
+  var i = curIdx(); if(i<0 || replay(i).done) return;
+  if(!(await yesno('End innings', 'Close this innings now (all out with fewer players, declared)?', 'End innings'))) return;
+  try{ await appendEvent({t:'end'}, i); }
+  catch(err){ writeError(err); return; }
+  render();
+  await afterChange();
+}
+async function moreMenu(){
+  var x = await choose('More', [
+    {l:'Retire batter',v:'retire'},{l:'Change bowler',v:'bowler'},{l:'Rename player',v:'rename'},{l:'End innings',v:'end'}], {cols:2});
+  if(x==='retire') await retire();
+  else if(x==='bowler') await changeBowler();
+  else if(x==='rename') await renamePlayer();
+  else if(x==='end') await endInnings();
+}
+
+/* ------------------------------ rendering ---------------------------- */
+var ui = {tab:'score', cardInn:0, cardView:'card', busy:false};
+
+/* ============================ LIVE SYNC ============================== */
+var SDK_VERSION = '10.12.2';
+var STALE_MS = 120000;
+var LIVE = {fb:null, db:null, uid:null, mid:'', ready:false, loaded:false, exists:true, missing:false, connected:true,
+  offset:0, scorer:null, events:[], setup:null, unsub:[], error:''};
+
+function configMissing(){ return String(FIREBASE_CONFIG.apiKey || '').indexOf('PASTE') === 0; }
+function rid(){ return Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4); }
+function newMid(){ var s = ''; while(s.length < 8) s += Math.random().toString(36).slice(2); return s.slice(0, 8); }
+function withTimeout(p, ms){
+  return new Promise(function(res, rej){
+    var t = setTimeout(function(){ rej(new Error('TIMEOUT')); }, ms);
+    p.then(function(v){ clearTimeout(t); res(v); }, function(e){ clearTimeout(t); rej(e); });
+  });
+}
+function nowMs(){ return Date.now() + (LIVE.offset || 0); }
+function isScorer(){ return !!(LIVE.scorer && LIVE.uid && LIVE.scorer.uid === LIVE.uid); }
+function scorerFresh(){
+  var s = LIVE.scorer; if(!s) return false;
+  if(typeof s.hb !== 'number') return true;
+  return nowMs() - s.hb < STALE_MS;
+}
+function dbRef(path){ return LIVE.fb.ref(LIVE.db, path); }
+function isPermission(err){ var m = String((err && (err.code || err.message)) || '').toLowerCase(); return m.indexOf('permission') >= 0; }
+
+async function liveInit(){
+  if(LIVE.ready) return;
+  var fb = globalThis.__FB_MOCK;
+  if(!fb){
+    var base = 'https://www.gstatic.com/firebasejs/' + SDK_VERSION + '/';
+    var mods = await Promise.all([import(base + 'firebase-app.js'), import(base + 'firebase-auth.js'), import(base + 'firebase-database.js')]);
+    fb = Object.assign({}, mods[0], mods[1], mods[2]);
+  }
+  LIVE.fb = fb;
+  var app = fb.initializeApp(FIREBASE_CONFIG);
+  var auth = fb.getAuth(app);
+  /* wait for the saved sign-in to load, so the same phone keeps the same identity (needed to stay the scorer after a reload) */
+  if(auth.authStateReady) await auth.authStateReady();
+  else await new Promise(function(r){ var u = fb.onAuthStateChanged(auth, function(){ try{ u(); }catch(e){} r(); }); });
+  if(auth.currentUser){ LIVE.uid = auth.currentUser.uid; }
+  else { var cred = await fb.signInAnonymously(auth); LIVE.uid = cred.user.uid; }
+  LIVE.db = fb.getDatabase(app);
+  fb.onValue(dbRef('.info/connected'), function(s){ LIVE.connected = !!s.val(); render(); });
+  fb.onValue(dbRef('.info/serverTimeOffset'), function(s){ LIVE.offset = s.val() || 0; });
+  LIVE.ready = true;
+}
+
+function eventsArray(raw){
+  var out = [], k;
+  if(!raw) return out;
+  if(Array.isArray(raw)){
+    for(k = 0; k < raw.length; k++){ if(raw[k]) out.push(raw[k]); else break; }
+  } else {
+    var keys = Object.keys(raw).map(Number).sort(function(a, b){ return a - b; });
+    for(k = 0; k < keys.length; k++){ if(keys[k] !== k) break; out.push(raw[keys[k]]); }
+  }
+  return out;
+}
+function rebuildM(){
+  var base = newMatch().setup;
+  var setup = LIVE.setup ? Object.assign(base, LIVE.setup) : base;
+  var m = {v:1, setup:setup, inns:[]};
+  LIVE.events.forEach(function(ev){
+    var i = ev.inn || 0;
+    while(m.inns.length <= i) m.inns.push({events:[]});
+    m.inns[i].events.push(ev);
+  });
+  M = m;
+}
+function closeMatch(){
+  LIVE.unsub.forEach(function(u){ try{ u(); }catch(e){} });
+  LIVE.unsub = [];
+  LIVE.mid = ''; LIVE.loaded = false; LIVE.exists = true; LIVE.scorer = null; LIVE.events = []; LIVE.setup = null;
+  M = newMatch();
+}
+function remember(mid){
+  var list = []; try{ list = JSON.parse(lsGet(LS_RECENT) || '[]'); }catch(e){ list = []; }
+  list = list.filter(function(x){ return x.id !== mid; });
+  list.unshift({id:mid, title:(M.setup.a + ' v ' + M.setup.b), at:Date.now()});
+  lsSet(LS_RECENT, JSON.stringify(list.slice(0, 12)));
+}
+function openMatch(mid){
+  closeMatch();
+  LIVE.mid = mid;
+  var un = LIVE.fb.onValue(dbRef('matches/' + mid), function(snap){
+    var val = snap.val();
+    LIVE.loaded = true;
+    if(!val){ LIVE.exists = false; LIVE.setup = null; LIVE.events = []; LIVE.scorer = null; }
+    else { LIVE.exists = true; LIVE.setup = val.setup || null; LIVE.events = eventsArray(val.events); LIVE.scorer = val.scorer || null; }
+    rebuildM();
+    if(val) remember(mid);
+    render();
+  }, function(err){
+    LIVE.error = (err && err.message) || 'Could not read the match';
+    LIVE.loaded = true; LIVE.exists = false; render();
+  });
+  LIVE.unsub.push(un);
+}
+
+/* add one event at the next free position. If another phone got there first, this fails safely. */
+async function appendEvent(ev, inn){
+  if(!isScorer()) throw new Error('NOT_SCORER');
+  if(!LIVE.connected) throw new Error('OFFLINE');
+  var e = JSON.parse(JSON.stringify(ev));
+  e.inn = inn; e.id = rid();
+  var n = LIVE.events.length, token = {cancelled:false};
+  var res;
+  try{
+    res = await withTimeout(LIVE.fb.runTransaction(dbRef('matches/' + LIVE.mid + '/events/' + n), function(cur){
+      if(token.cancelled) return undefined;
+      return cur === null || cur === undefined ? e : undefined;
+    }), 10000);
+  }catch(err){ token.cancelled = true; throw err; }
+  if(!res.committed) throw new Error('STALE');
+  if(LIVE.events.length === n){ LIVE.events.push(e); rebuildM(); }
+  return n;
+}
+async function removeLastEvent(){
+  if(!isScorer()) throw new Error('NOT_SCORER');
+  if(!LIVE.connected) throw new Error('OFFLINE');
+  var n = LIVE.events.length - 1, last = LIVE.events[n], token = {cancelled:false};
+  if(!last) throw new Error('STALE');
+  var res;
+  try{
+    res = await withTimeout(LIVE.fb.runTransaction(dbRef('matches/' + LIVE.mid + '/events/' + n), function(cur){
+      if(token.cancelled) return undefined;
+      return cur && cur.id === last.id ? null : undefined;
+    }), 10000);
+  }catch(err){ token.cancelled = true; throw err; }
+  if(!res.committed) throw new Error('STALE');
+  if(LIVE.events.length === n + 1){ LIVE.events.pop(); rebuildM(); }
+}
+function writeError(err){
+  var m = String((err && err.message) || err);
+  if(m === 'NOT_SCORER') toast('You are not the scorer');
+  else if(m === 'OFFLINE') toast('No signal. That was NOT saved. Try again.');
+  else if(m === 'TIMEOUT') toast('Slow signal. That may not have saved. Check the score, then try again.');
+  else if(m === 'STALE') toast('Another phone scored first. Your screen is refreshing.');
+  else if(isPermission(err)) toast('You are no longer the scorer');
+  else toast('Could not save: ' + m);
+  render();
+}
+
+/* ---- who is the scorer ---- */
+async function claimScorer(mid, name){
+  var token = {busy:false};
+  var res = await withTimeout(LIVE.fb.runTransaction(LIVE.fb.ref(LIVE.db, 'matches/' + mid + '/scorer'), function(cur){
+    var fresh = cur && typeof cur.hb === 'number' ? (nowMs() - cur.hb < STALE_MS) : !!cur;
+    if(cur && cur.uid !== LIVE.uid && fresh){ token.busy = cur.name || 'Someone'; return undefined; }
+    return {uid:LIVE.uid, name:name, hb:LIVE.fb.serverTimestamp()};
+  }), 10000);
+  if(!res.committed) throw new Error('BUSY:' + (token.busy || 'Someone'));
+}
+async function becomeScorer(){
+  if(!LIVE.mid) return;
+  if(isScorer()){ toast('You are already the scorer'); return; }
+  if(LIVE.scorer && scorerFresh()){ toast(LIVE.scorer.name + ' is scoring right now. Ask them to hand over.'); return; }
+  var name = await ask({title:'Your name', sub:'Shown to everyone watching', ph:'e.g. Ali', chips:[]}); if(!name) return;
+  var pin = await ask({title:'Match PIN', sub:'Ask the batting side captain for the PIN', ph:'PIN'}); if(!pin) return;
+  lsSet(LS_NAME, name);
+  try{
+    await withTimeout(LIVE.fb.set(dbRef('claims/' + LIVE.mid + '/' + LIVE.uid), pin), 10000);
+    await claimScorer(LIVE.mid, name);
+    toast('You are now the scorer');
+  }catch(err){
+    var m = String((err && err.message) || '');
+    if(m.indexOf('BUSY:') === 0) toast(m.slice(5) + ' is scoring right now');
+    else if(isPermission(err)) toast('That PIN is not correct');
+    else if(m === 'TIMEOUT') toast('Slow signal. Please try again.');
+    else toast('Could not take over: ' + m);
+  }
+  render();
+}
+async function releaseScoring(){
+  if(!isScorer()) return;
+  if(!(await yesno('Hand over scoring', 'Others will see that nobody is scoring, and the next scorer can continue from the next ball.', 'Hand over'))) return;
+  try{ await withTimeout(LIVE.fb.remove(dbRef('matches/' + LIVE.mid + '/scorer')), 10000); toast('Handed over'); }
+  catch(err){ writeError(err); }
+}
+
+/* ---- create / open / share ---- */
+async function createMatch(){
+  var vals = {a:'Team A', b:'Team B', batFirst:'a', overs:'30', name:lsGet(LS_NAME) || '', pin:''};
+  for(;;){
+    var f = await form('New live match', 'Everyone with the link can watch. Only people with the PIN can score.', [
+      {k:'a', label:'Team A', value:vals.a},
+      {k:'b', label:'Team B', value:vals.b},
+      {k:'batFirst', label:'Who bats first', type:'select', value:vals.batFirst, options:[{v:'a', l:'Team A'},{v:'b', l:'Team B'}]},
+      {k:'overs', label:'Overs per innings', type:'number', value:vals.overs},
+      {k:'name', label:'Your name (you will score first)', value:vals.name, ph:'e.g. Ali'},
+      {k:'pin', label:'Match PIN (4 to 12 letters or numbers)', value:vals.pin, ph:'e.g. 4821'}
+    ], 'Create match');
+    if(!f) return;
+    vals = f;
+    var overs = parseInt(f.overs, 10);
+    if(!f.a || !f.b){ toast('Enter both team names'); continue; }
+    if(isNaN(overs) || overs < 1 || overs > 100){ toast('Overs must be 1 to 100'); continue; }
+    if(!f.name){ toast('Enter your name'); continue; }
+    if(!/^[A-Za-z0-9]{4,12}$/.test(f.pin)){ toast('PIN: 4 to 12 letters or numbers, no spaces'); continue; }
+    break;
+  }
+  var mid = newMid();
+  try{
+    await withTimeout(LIVE.fb.set(dbRef('pins/' + mid), vals.pin), 10000);
+    await withTimeout(LIVE.fb.set(dbRef('claims/' + mid + '/' + LIVE.uid), vals.pin), 10000);
+    await claimScorer(mid, vals.name);
+    var setup = newMatch().setup;
+    setup.a = vals.a; setup.b = vals.b; setup.batFirst = vals.batFirst; setup.overs = parseInt(vals.overs, 10);
+    await withTimeout(LIVE.fb.set(dbRef('matches/' + mid + '/setup'), setup), 10000);
+  }catch(err){
+    toast('Could not create the match: ' + ((err && err.message) || err));
+    return;
+  }
+  lsSet(LS_NAME, vals.name);
+  location.hash = '#m=' + mid;
+  route();
+  await info('Match created', 'Share the link with everyone so they can watch.\n\nMatch PIN: ' + vals.pin + '\nGive the PIN only to people who will score.');
+  await shareLink();
+}
+function extractMid(text){
+  var t = String(text || '').trim();
+  var m = /[#&]m=([A-Za-z0-9]+)/.exec(t);
+  if(m) return m[1];
+  if(/^[A-Za-z0-9]{8}$/.test(t)) return t;
+  return '';
+}
+async function openPrompt(){
+  var t = await ask({title:'Open a match', sub:'Paste the match link', ph:'Paste link here'}); if(!t) return;
+  var mid = extractMid(t);
+  if(!mid){ toast('That does not look like a match link'); return; }
+  location.hash = '#m=' + mid;
+  route();
+}
+async function shareLink(){
+  if(!LIVE.mid) return;
+  var url = location.href.split('#')[0] + '#m=' + LIVE.mid;
+  var title = M.setup.a + ' v ' + M.setup.b;
+  if(navigator.share){
+    try{ await navigator.share({title:title, text:'Follow the live score: ' + title, url:url}); return; }
+    catch(e){ if(e && e.name === 'AbortError') return; }
+  }
+  await textBox('Match link (viewers only)', url, false);
+}
+function parseHash(){ var m = /[#&]m=([A-Za-z0-9]+)/.exec(location.hash || ''); return m ? m[1] : ''; }
+function route(){
+  if(!LIVE.ready) return;
+  var mid = parseHash();
+  if(!mid){ if(LIVE.mid) closeMatch(); render(); return; }
+  if(mid === LIVE.mid) return;
+  openMatch(mid);
+  ui.tab = 'score';
+  render();
+}
+async function boot(){
+  render();
+  if(configMissing()){ LIVE.missing = true; render(); return; }
+  try{ await liveInit(); }
+  catch(err){ LIVE.error = (err && err.message) || String(err); render(); return; }
+  window.addEventListener('hashchange', route);
+  setInterval(function(){
+    if(!LIVE.ready || !LIVE.mid) return;
+    if(isScorer() && document.visibilityState === 'visible' && LIVE.connected){
+      LIVE.fb.update(dbRef('matches/' + LIVE.mid + '/scorer'), {hb:LIVE.fb.serverTimestamp()}).catch(function(){});
+    }
+    renderBar();
+  }, 30000);
+  route();
+  render();
+}
+
+var actions = {
+  r0:function(){return runs(0);}, r1:function(){return runs(1);}, r2:function(){return runs(2);}, r3:function(){return runs(3);},
+  r4:function(){return runs(4);}, r5:function(){return runs(5);}, r6:function(){return runs(6);},
+  W:wicket, wd:wide, nb:noball, bye:function(){return byes('bye');}, lb:function(){return byes('lb');},
+  undo:undo, swap:swapStrike, more:moreMenu,
+  start:startInnings, bowler:function(){return pickBowler(false);},
+  claim:becomeScorer, handover:releaseScoring
+};
+var SCORER_ONLY = {r0:1,r1:1,r2:1,r3:1,r4:1,r5:1,r6:1,W:1,wd:1,nb:1,bye:1,lb:1,undo:1,swap:1,more:1,start:1,bowler:1};
+async function act(a){
+  if(ui.busy) return;
+  if(SCORER_ONLY[a] && !isScorer()){ toast('Only the scorer can do that'); return; }
+  ui.busy = true;
+  try{ if(actions[a]) await actions[a](); }
+  catch(err){ console.error(err); toast('Something went wrong: ' + err.message); }
+  finally{ ui.busy = false; render(); }
+}
+function ballClass(l){
+  if(l==='4') return 'b4'; if(l==='6') return 'b6';
+  if(l.indexOf('W')>=0 && l.indexOf('Wd')!==0) return 'w';
+  if(l.indexOf('W')>=0) return 'w';
+  if(/^(Wd|Nb|B|Lb)/.test(l)) return 'x';
+  return '';
+}
+function renderScore(){
+  var v = $('#view'), pad = $('#pad'), S = M.setup, n = M.inns.length, sc = isScorer();
+  pad.innerHTML = '';
+  if(n===0){
+    v.innerHTML = '<div class="start"><h1>' + esc(S.a) + ' v ' + esc(S.b) + '</h1><p>' + esc(batTeam(0)) + ' bat first. ' + S.overs + ' overs each.</p>' +
+      (sc ? '<button class="btn full" data-a="start">Start innings 1</button><p style="margin-top:18px">Change team names, overs and who bats first on the Match tab.</p>'
+          : '<p>Waiting for the scorer to start the match.</p>') + '</div>';
+    return;
+  }
+  var i = n-1, st = replay(i);
+  var rrate = st.balls ? (st.score/(st.balls/6)).toFixed(2) : '-';
+  var html = '<div class="board"><div class="who"><span>' + esc(batTeam(i)) + '</span><span>Innings ' + (i+1) + '</span></div>' +
+    '<div class="big num">' + st.score + '<small>/' + st.wkts + '</small></div>' +
+    '<div class="row"><span>' + fmtOv(st.balls) + ' of ' + S.overs + ' overs</span><span>Run rate ' + rrate + '</span></div>';
+  if(i===1){
+    var need = st.target - st.score, left = S.overs*6 - st.balls;
+    html += '<div class="chase">' + (need<=0 ? 'Target reached' : 'Need ' + need + ' from ' + left + ' balls' + (left>0 ? ', required rate ' + (need/(left/6)).toFixed(2) : '')) + '</div>';
+  }
+  html += '</div>';
+  if(st.done){
+    html += '<div class="banner"><b>' + esc(st.doneReason) + '</b>';
+    if(i===0){
+      html += 'Innings 1 finished on ' + st.score + '/' + st.wkts + '. ' +
+        (sc ? '<div style="margin-top:10px"><button class="btn full" data-a="start">Start innings 2</button></div>' : 'Waiting for the scorer to start innings 2.');
+    } else html += esc(matchResult() || '') + '<div style="margin-top:10px">Full card on the Scorecard tab.</div>';
+    html += '</div>';
+  } else if(st.needBowler){
+    html += '<div class="banner"><b>Over complete</b>' + (sc ? '<button class="btn full" data-a="bowler">Choose next bowler</button>' : 'Waiting for the next bowler.') + '</div>';
+  }
+  function bat(name, star){
+    var b = null; st.batters.forEach(function(x){ if(same(x.name,name)) b = x; });
+    if(!name) return '';
+    return '<div class="line"><div class="nm">' + esc(name) + (star ? '<i>*</i>' : '') + '</div><div class="st num">' + (b?b.runs:0) + ' <small>(' + (b?b.balls:0) + ')</small></div></div>';
+  }
+  html += '<div class="card">' + bat(st.striker, true) + bat(st.non, false);
+  var bo = null; st.bowlers.forEach(function(x){ if(same(x.name, st.bowler)) bo = x; });
+  html += '<div class="line"><div><div class="lbl">Bowling</div><div class="nm">' + esc(st.bowler) + '</div></div>' +
+    '<div class="st num">' + (bo ? fmtOv(bo.balls) + '-' + bo.maidens + '-' + bo.runs + '-' + bo.wkts : '') + '</div></div></div>';
+  html += '<div class="card"><div class="line" style="padding-bottom:0"><div class="lbl">This over</div></div><div class="over">' +
+    (st.thisOver.length ? st.thisOver.map(function(l){ return '<span class="ball num ' + ballClass(l) + '">' + esc(l) + '</span>'; }).join('') : '<span class="lbl">No balls yet</span>') + '</div></div>';
+  v.innerHTML = html;
+  if(sc && st.started && !st.done && !st.needBowler){
+    pad.innerHTML = '<div class="pad">' +
+      ['0','1','2','3'].map(function(x){ return '<button class="k" data-a="r'+x+'">'+x+'</button>'; }).join('') +
+      '<button class="k g" data-a="r4">4</button><button class="k" data-a="r5">5</button><button class="k g" data-a="r6">6</button><button class="k r" data-a="W">W</button>' +
+      '<button class="k e" data-a="wd">Wide</button><button class="k e" data-a="nb">No ball</button><button class="k e" data-a="bye">Bye</button><button class="k e" data-a="lb">Leg bye</button>' +
+      '<button class="k s" data-a="undo">Undo</button><button class="k s" data-a="swap">Swap strike</button><button class="k s span2" data-a="more">More: retire, bowler, rename, end</button></div>';
+  } else if(sc){
+    pad.innerHTML = !st.done ? '<div class="pad"><button class="k s span2" data-a="undo">Undo</button><button class="k s span2" data-a="more">More</button></div>' : '<div class="pad"><button class="k s span2" data-a="undo">Undo last entry</button></div>';
+  }
+}
+function oversText(b){ return fmtOv(b); }
+function renderCard(){
+  var v = $('#view'); $('#pad').innerHTML = '';
+  var S = M.setup;
+  var html = '<div class="seg"><button data-inn="0" aria-pressed="' + (ui.cardInn===0) + '">Innings 1</button><button data-inn="1" aria-pressed="' + (ui.cardInn===1) + '">Innings 2</button></div>' +
+    '<div class="seg"><button data-view="card" aria-pressed="' + (ui.cardView==='card') + '">Scorecard</button><button data-view="log" aria-pressed="' + (ui.cardView==='log') + '">Ball log</button></div>';
+  var i = ui.cardInn;
+  if(!M.inns[i]){ v.innerHTML = html + '<div class="start"><p>This innings has not started.</p></div>'; return; }
+  var st = replay(i);
+  if(ui.cardView==='log'){ v.innerHTML = html + renderLog(i, st); return; }
+  html += '<div class="h3" style="margin-top:4px">' + esc(batTeam(i)) + ' batting</div><div class="tw"><table><tr><th>Batter</th><th>R</th><th>B</th><th>4s</th><th>6s</th><th>SR</th></tr>';
+  st.batters.forEach(function(b){
+    html += '<tr><td>' + esc(b.name) + '<span class="how">' + esc(b.how) + '</span></td><td class="num"><b>' + b.runs + '</b></td><td class="num">' + b.balls + '</td><td class="num">' + b.fours + '</td><td class="num">' + b.sixes + '</td><td class="num">' + (b.balls ? (b.runs/b.balls*100).toFixed(1) : '-') + '</td></tr>';
+  });
+  var ex = st.extras, exT = ex.wd + ex.nb + ex.b + ex.lb;
+  html += '<tr><td>Extras<span class="how">b ' + ex.b + ', lb ' + ex.lb + ', w ' + ex.wd + ', nb ' + ex.nb + '</span></td><td class="num"><b>' + exT + '</b></td><td></td><td></td><td></td><td></td></tr>';
+  html += '<tr class="tot"><td>Total<span class="how">' + st.wkts + ' wkts, ' + fmtOv(st.balls) + ' ov' + (st.balls ? ', RR ' + (st.score/(st.balls/6)).toFixed(2) : '') + '</span></td><td class="num">' + st.score + '</td><td></td><td></td><td></td><td></td></tr></table></div>';
+  if(st.fow.length){
+    html += '<div class="h3">Fall of wickets</div><ul class="fow">' + st.fow.map(function(f){ return '<li>' + f.n + '-' + f.score + ' (' + esc(f.name) + ', ' + f.over + ' ov)</li>'; }).join('') + '</ul>';
+  }
+  html += '<div class="h3">Bowling ' + esc(bowlTeam(i)) + '</div><div class="tw"><table><tr><th>Bowler</th><th>O</th><th>M</th><th>R</th><th>W</th><th>Econ</th><th>Wd</th><th>Nb</th></tr>';
+  st.bowlers.forEach(function(b){
+    html += '<tr><td>' + esc(b.name) + '</td><td class="num">' + fmtOv(b.balls) + '</td><td class="num">' + b.maidens + '</td><td class="num">' + b.runs + '</td><td class="num"><b>' + b.wkts + '</b></td><td class="num">' + (b.balls ? (b.runs/(b.balls/6)).toFixed(2) : '-') + '</td><td class="num">' + b.wd + '</td><td class="num">' + b.nb + '</td></tr>';
+  });
+  html += '</table></div>';
+  var parts = st.parts.slice();
+  if(st.striker && st.non && !st.done || (st.done && st.striker && st.non)) parts.push({a:st.striker, b:st.non, runs:st.score - st.lastFall, open:true});
+  if(parts.length){
+    html += '<div class="h3">Partnerships</div><ul class="fow">' + parts.map(function(p, k){ return '<li>' + esc(p.a) + ' &amp; ' + esc(p.b) + ': <b>' + p.runs + '</b>' + (p.open ? ' (not out)' : '') + '</li>'; }).join('') + '</ul>';
+  }
+  v.innerHTML = html;
+}
+function renderLog(i, st){
+  if(!st.log.length) return '<div class="start"><p>No balls yet.</p></div>';
+  var groups = [], cur = null, pending = [];
+  st.log.forEach(function(r){
+    if(r.note){ pending.push(r); return; }
+    var on = parseInt(r.over, 10);
+    if(!cur || cur.over !== on){ cur = {over:on, bowler:r.bowler, rows:[], runs:0}; groups.push(cur); }
+    pending.forEach(function(p){ cur.rows.push(p); }); pending = [];
+    cur.rows.push(r); cur.runs += r.total;
+  });
+  if(pending.length){ if(!cur){ cur = {over:null, rows:[], runs:0}; groups.push(cur); } pending.forEach(function(p){ cur.rows.push(p); }); }
+  var html = '<div class="acts" style="margin-top:0"><button class="btn alt" data-m="logtext">Copy ball log</button></div>';
+  groups.slice().reverse().forEach(function(g){
+    if(g.over===null){ html += '<div class="card">' + g.rows.map(function(r){ return '<div class="line lg"><div class="nm">' + esc(r.note) + '</div></div>'; }).join('') + '</div>'; return; }
+    html += '<div class="h3">Over ' + (g.over+1) + ', ' + esc(g.bowler) + ': ' + g.runs + ' run' + (g.runs===1?'':'s') + '</div><div class="card">';
+    html += g.rows.map(function(r){
+      if(r.note) return '<div class="line lg"><div class="nm lbl">' + esc(r.note) + '</div></div>';
+      return '<div class="line lg"><span class="ball num ' + ballClass(r.label) + '">' + esc(r.label) + '</span>' +
+        '<div class="nm"><span class="lbl">' + esc(r.over) + '</span> ' + esc(r.bowler) + ' to ' + esc(r.striker) + '<span class="how" style="display:block;color:var(--muted);font-size:14px">' + esc(r.text) + '</span></div>' +
+        '<div class="st num"><small>' + r.score + '/' + r.wkts + '</small></div></div>';
+    }).join('') + '</div>';
+  });
+  return html;
+}
+function buildLogText(i){
+  var st = replay(i), out = [batTeam(i) + ' innings, ball by ball'];
+  st.log.forEach(function(r){
+    if(r.note) out.push('  ' + r.note);
+    else out.push(r.over + '  ' + r.bowler + ' to ' + r.striker + ': ' + r.text + '  (' + r.score + '/' + r.wkts + ')');
+  });
+  return out.join('\n');
+}
+function renderMatch(){
+  var v = $('#view'); $('#pad').innerHTML = '';
+  var S = M.setup, sc = isScorer(), locked = M.inns.length > 0, dis = sc ? '' : ' disabled';
+  var res = matchResult();
+  var html = '<div class="h3" style="margin-top:4px">Result</div><div class="res">' + esc(res || (M.inns.length ? 'Match in progress' : 'Not started')) + '</div>' +
+    '<div class="acts" style="margin-top:0"><button class="btn full" data-m="share">Share match link</button></div>' +
+    '<div class="acts"><button class="btn alt" data-m="pdf">Download PDF</button><button class="btn alt" data-m="text">Scorecard text</button></div>';
+  if(sc) html += '<div class="acts"><button class="btn alt full" data-a="handover">Hand over scoring</button></div>';
+  else if(!LIVE.scorer || !scorerFresh()) html += '<div class="acts"><button class="btn alt full" data-a="claim">Become scorer</button></div>';
+  html += '<div class="h3">Match setup' + (sc ? '' : ' (only the scorer can change these)') + '</div>' +
+    '<div class="field"><label>Match title (optional)</label><input type="text" data-s="title" value="' + esc(S.title) + '"' + dis + '></div>' +
+    '<div class="two"><div class="field"><label>Team A</label><input type="text" data-s="a" value="' + esc(S.a) + '"' + dis + '></div><div class="field"><label>Team B</label><input type="text" data-s="b" value="' + esc(S.b) + '"' + dis + '></div></div>' +
+    '<div class="field"><label>Bats first' + (locked ? ' (locked once the match starts)' : '') + '</label><select data-s="batFirst"' + ((locked || !sc) ? ' disabled' : '') + '><option value="a"' + (S.batFirst==='a' ? ' selected' : '') + '>' + esc(S.a) + '</option><option value="b"' + (S.batFirst==='b' ? ' selected' : '') + '>' + esc(S.b) + '</option></select></div>' +
+    '<div class="two"><div class="field"><label>Overs per innings</label><input type="number" inputmode="numeric" min="1" max="100" data-s="overs" value="' + S.overs + '"' + dis + '></div>' +
+    '<div class="field"><label>Max wickets (10 = 11 a side)</label><input type="number" inputmode="numeric" min="1" max="10" data-s="maxWkts" value="' + S.maxWkts + '"' + dis + '></div></div>' +
+    '<div class="field"><label>Max overs per bowler (0 = no limit)</label><input type="number" inputmode="numeric" min="0" max="100" data-s="maxBowlerOvers" value="' + S.maxBowlerOvers + '"' + dis + '></div>' +
+    '<div class="h3">Other matches</div><div class="acts" style="margin-top:0"><button class="btn alt full" data-m="home">All matches / start a new match</button></div>' +
+    '<p class="lbl" style="margin-top:14px">The match is stored online, so it is still there after you close the app. The PDF is your permanent copy.</p>';
+  v.innerHTML = html;
+}
+function renderBar(){
+  var b = $('#bar'); if(!b) return;
+  if(!LIVE.ready || !LIVE.mid){ b.className = ''; b.innerHTML = '<span>Cricket Scorer Live</span>'; return; }
+  var s = LIVE.scorer, cls = '', txt = '', btn = '';
+  if(!LIVE.connected){ cls = 'off'; txt = 'No signal. Reconnecting...'; }
+  else if(isScorer()){ cls = 'me'; txt = 'You are the scorer'; btn = '<button data-a="handover">Hand over</button>'; }
+  else if(!s){ cls = 'none'; txt = 'Nobody is scoring'; btn = '<button data-a="claim">Become scorer</button>'; }
+  else if(scorerFresh()){ cls = 'view'; txt = esc(s.name) + ' is scoring. You are watching.'; }
+  else {
+    var mins = Math.max(1, Math.round((nowMs() - (s.hb || 0)) / 60000));
+    cls = 'stale'; txt = esc(s.name) + ' not seen for ' + mins + ' min'; btn = '<button data-a="claim">Become scorer</button>';
+  }
+  b.className = cls;
+  b.innerHTML = '<span>' + txt + '</span>' + btn;
+}
+function msgScreen(title, text, btns){
+  $('#pad').innerHTML = '';
+  $('#view').innerHTML = '<div class="start"><h1>' + esc(title) + '</h1><p style="white-space:pre-line">' + esc(text) + '</p>' + (btns || '') + '</div>';
+}
+function renderHome(){
+  var list = []; try{ list = JSON.parse(lsGet(LS_RECENT) || '[]'); }catch(e){ list = []; }
+  var html = '<div class="start"><h1>Cricket Scorer Live</h1><p>One scorer at a time. Everyone else watches live.</p>' +
+    '<button class="btn full" data-h="new">Start a new live match</button>' +
+    '<div style="height:10px"></div><button class="btn alt full" data-h="open">Open a match (paste link)</button></div>';
+  if(list.length){
+    html += '<div class="h3">Recent matches on this phone</div><div class="card">' +
+      list.map(function(x){ return '<div class="line"><div class="nm">' + esc(x.title) + '</div><button class="chip" data-h="recent" data-id="' + esc(x.id) + '">Open</button></div>'; }).join('') + '</div>';
+  }
+  $('#pad').innerHTML = '';
+  $('#view').innerHTML = html;
+}
+function render(){
+  renderBar();
+  var tabs = document.querySelector('.tabs');
+  var inMatch = !!(LIVE.ready && LIVE.mid && LIVE.loaded && LIVE.exists);
+  if(tabs) tabs.style.display = inMatch ? '' : 'none';
+  if(LIVE.missing){ msgScreen('Not set up yet', 'This copy of the app is not connected to the club database yet.\nThe club admin needs to follow SETUP-GUIDE.txt once.'); return; }
+  if(!LIVE.ready){
+    if(LIVE.error) msgScreen('Could not connect', LIVE.error + '\nCheck your signal, then try again.', '<button class="btn full" data-h="retry">Try again</button>');
+    else msgScreen('Connecting...', 'Please wait.');
+    return;
+  }
+  if(!LIVE.mid){ renderHome(); return; }
+  if(!LIVE.loaded){ msgScreen('Loading match...', 'Please wait.'); return; }
+  if(!LIVE.exists){ msgScreen('Match not found', LIVE.error || 'This link does not match any live game.', '<button class="btn full" data-m="home">Back to all matches</button>'); return; }
+  document.querySelectorAll('.tabs button').forEach(function(b){ b.setAttribute('aria-selected', String(b.dataset.tab===ui.tab)); });
+  if(ui.tab==='score') renderScore(); else if(ui.tab==='card') renderCard(); else renderMatch();
+}
+
+/* ------------------------------ text export -------------------------- */
+function buildText(){
+  var S = M.setup, out = [];
+  out.push((S.title ? S.title + '\n' : '') + S.a + ' v ' + S.b + ' (' + S.overs + ' overs)');
+  M.inns.forEach(function(inn, i){
+    var st = replay(i);
+    out.push('');
+    out.push(batTeam(i) + ' innings: ' + st.score + '/' + st.wkts + ' (' + fmtOv(st.balls) + ' ov)');
+    st.batters.forEach(function(b){ out.push('  ' + b.name + '  ' + b.how + '  ' + b.runs + ' (' + b.balls + ')  4s ' + b.fours + '  6s ' + b.sixes); });
+    var ex = st.extras;
+    out.push('  Extras ' + (ex.wd+ex.nb+ex.b+ex.lb) + ' (b ' + ex.b + ', lb ' + ex.lb + ', w ' + ex.wd + ', nb ' + ex.nb + ')');
+    if(st.fow.length) out.push('  FOW: ' + st.fow.map(function(f){ return f.n + '-' + f.score + ' (' + f.name + ', ' + f.over + ')'; }).join(', '));
+    out.push('  Bowling:');
+    st.bowlers.forEach(function(b){ out.push('  ' + b.name + '  ' + fmtOv(b.balls) + '-' + b.maidens + '-' + b.runs + '-' + b.wkts); });
+  });
+  var r = matchResult(); if(r){ out.push(''); out.push(r); }
+  return out.join('\n');
+}
+
+/* ------------------------------ PDF export --------------------------- */
+function pdfEsc(s){ return s.replace(/[\\()]/g, '\\$&'); }
+function pdfSafe(s){
+  var o = '';
+  for(var k=0;k<s.length;k++){
+    var c = s.charCodeAt(k);
+    if(c===9) o += ' '; else if(c<32) o += ''; else if(c>255) o += '?'; else o += s.charAt(k);
+  }
+  return o;
+}
+function padR(s,n){ s = String(s); return s.length>n ? s.slice(0,n-1) + '.' : s + new Array(n - s.length + 1).join(' '); }
+function padL(s,n){ s = String(s); return s.length>=n ? s.slice(-n) : new Array(n - s.length + 1).join(' ') + s; }
+function wrapText(s,w){
+  var out = [], words = String(s).split(' '), cur = '';
+  words.forEach(function(wd){
+    if(cur && (cur + ' ' + wd).length > w){ out.push(cur); cur = wd; }
+    else cur = cur ? cur + ' ' + wd : wd;
+  });
+  if(cur) out.push(cur);
+  if(!out.length) out.push('');
+  return out.map(function(l){ return l.slice(0,w); });
+}
+function PdfDoc(){
+  var W = 595, H = 842, MX = 36, MT = 42, MB = 44, pages = [], cur = null, y = 0;
+  function newPage(){ cur = []; pages.push(cur); y = H - MT; }
+  newPage();
+  return {
+    line:function(str, font, size, o){
+      o = o || {};
+      var lh = size * (o.lh || 1.3);
+      if(y - lh < MB) newPage();
+      y -= lh;
+      cur.push('BT /' + font + ' ' + size + ' Tf ' + (MX + (o.x||0)) + ' ' + y.toFixed(1) + ' Td (' + pdfEsc(pdfSafe(str)) + ') Tj ET');
+    },
+    gap:function(n){ y -= n; },
+    ensure:function(h){ if(y - h < MB) newPage(); },
+    pageBreak:function(){ newPage(); },
+    rule:function(){
+      if(y - 8 < MB) newPage();
+      y -= 4; cur.push('0.6 w ' + MX + ' ' + y.toFixed(1) + ' m ' + (W-MX) + ' ' + y.toFixed(1) + ' l S'); y -= 4;
+    },
+    build:function(){
+      var objs = [];
+      objs[1] = '<< /Type /Catalog /Pages 2 0 R >>';
+      objs[3] = '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>';
+      objs[4] = '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>';
+      objs[5] = '<< /Type /Font /Subtype /Type1 /BaseFont /Courier /Encoding /WinAnsiEncoding >>';
+      objs[6] = '<< /Type /Font /Subtype /Type1 /BaseFont /Courier-Bold /Encoding /WinAnsiEncoding >>';
+      var kids = [];
+      pages.forEach(function(pg, idx){
+        var pid = 7 + idx*2, cid = pid + 1;
+        kids.push(pid + ' 0 R');
+        var footer = 'BT /F1 8 Tf ' + MX + ' 24 Td (Cricket Scorer) Tj ET\nBT /F1 8 Tf ' + (W-MX-60) + ' 24 Td (Page ' + (idx+1) + ' of ' + pages.length + ') Tj ET';
+        var stream = pg.join('\n') + '\n' + footer;
+        objs[pid] = '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 3 0 R /F2 4 0 R /F3 5 0 R /F4 6 0 R >> >> /Contents ' + cid + ' 0 R >>';
+        objs[cid] = '<< /Length ' + stream.length + ' >>\nstream\n' + stream + '\nendstream';
+      });
+      objs[2] = '<< /Type /Pages /Kids [' + kids.join(' ') + '] /Count ' + pages.length + ' >>';
+      var out = '%PDF-1.4\n', offs = [], k;
+      for(k=1;k<objs.length;k++){ offs[k] = out.length; out += k + ' 0 obj\n' + objs[k] + '\nendobj\n'; }
+      var xr = out.length;
+      out += 'xref\n0 ' + objs.length + '\n0000000000 65535 f \n';
+      for(k=1;k<objs.length;k++){ out += ('0000000000' + offs[k]).slice(-10) + ' 00000 n \n'; }
+      out += 'trailer\n<< /Size ' + objs.length + ' /Root 1 0 R >>\nstartxref\n' + xr + '\n%%EOF';
+      var u = new Uint8Array(out.length);
+      for(k=0;k<out.length;k++) u[k] = out.charCodeAt(k) & 255;
+      return u;
+    }
+  };
+}
+function dateStr(){
+  var d = new Date(), p = function(n){ return ('0' + n).slice(-2); };
+  return d.getFullYear() + '-' + p(d.getMonth()+1) + '-' + p(d.getDate());
+}
+function groupLog(st){
+  var groups = [], cur = null, pending = [];
+  st.log.forEach(function(r){
+    if(r.note){ pending.push(r); return; }
+    var on = parseInt(r.over, 10);
+    if(!cur || cur.over !== on){ cur = {over:on, bowler:r.bowler, rows:[], runs:0}; groups.push(cur); }
+    pending.forEach(function(q){ cur.rows.push(q); }); pending = [];
+    cur.rows.push(r); cur.runs += r.total;
+  });
+  if(pending.length){ if(!cur){ cur = {over:null, rows:[], runs:0}; groups.push(cur); } pending.forEach(function(q){ cur.rows.push(q); }); }
+  return groups;
+}
+function buildPDF(){
+  var S = M.setup, d = new PdfDoc();
+  d.line(S.title || (S.a + ' v ' + S.b), 'F2', 18, {lh:1.4});
+  if(S.title) d.line(S.a + ' v ' + S.b, 'F1', 12);
+  d.line(S.overs + ' overs per innings. Report created ' + dateStr(), 'F1', 10);
+  d.gap(6);
+  var res = matchResult();
+  d.line('Result: ' + (res || (M.inns.length ? 'Match not complete' : 'Not started')), 'F2', 12);
+  d.gap(2);
+  M.inns.forEach(function(inn, i){
+    var st = replay(i);
+    d.line(batTeam(i) + '   ' + st.score + '/' + st.wkts + '   (' + fmtOv(st.balls) + ' overs)', 'F1', 11);
+  });
+
+  M.inns.forEach(function(inn, i){
+    var st = replay(i), ex = st.extras, exT = ex.wd + ex.nb + ex.b + ex.lb;
+    d.ensure(150); d.gap(8); d.rule();
+    d.line(batTeam(i) + ' batting, innings ' + (i+1) + (i===1 ? '  (target ' + st.target + ')' : ''), 'F2', 13);
+    d.gap(2);
+    d.line(padR('Batter',22) + ' ' + padR('How out',34) + padL('R',4) + padL('B',5) + padL('4s',4) + padL('6s',4) + padL('SR',7), 'F4', 9);
+    st.batters.forEach(function(b){
+      d.line(padR(b.name,22) + ' ' + padR(b.how,34) + padL(b.runs,4) + padL(b.balls,5) + padL(b.fours,4) + padL(b.sixes,4) + padL(b.balls ? (b.runs/b.balls*100).toFixed(1) : '-',7), 'F3', 9);
+    });
+    d.line(padR('Extras',22) + ' ' + padR('(b ' + ex.b + ', lb ' + ex.lb + ', w ' + ex.wd + ', nb ' + ex.nb + ')',34) + padL(exT,4), 'F3', 9);
+    d.line(padR('Total',22) + ' ' + padR('(' + st.wkts + ' wkts, ' + fmtOv(st.balls) + ' ov' + (st.balls ? ', RR ' + (st.score/(st.balls/6)).toFixed(2) : '') + ')',34) + padL(st.score,4), 'F4', 9);
+    if(st.fow.length){
+      d.gap(6); d.line('Fall of wickets', 'F2', 10);
+      wrapText(st.fow.map(function(f){ return f.n + '-' + f.score + ' (' + f.name + ', ' + f.over + ')'; }).join('   '), 96).forEach(function(l){ d.line(l, 'F3', 9); });
+    }
+    d.gap(6); d.line('Bowling: ' + bowlTeam(i), 'F2', 10);
+    d.line(padR('Bowler',22) + padL('O',6) + padL('M',4) + padL('R',5) + padL('W',4) + padL('Econ',7) + padL('Wd',4) + padL('Nb',4), 'F4', 9);
+    st.bowlers.forEach(function(b){
+      d.line(padR(b.name,22) + padL(fmtOv(b.balls),6) + padL(b.maidens,4) + padL(b.runs,5) + padL(b.wkts,4) + padL(b.balls ? (b.runs/(b.balls/6)).toFixed(2) : '-',7) + padL(b.wd,4) + padL(b.nb,4), 'F3', 9);
+    });
+    var parts = st.parts.slice();
+    if(st.striker && st.non) parts.push({a:st.striker, b:st.non, runs:st.score - st.lastFall, open:true});
+    if(parts.length){
+      d.gap(6); d.line('Partnerships', 'F2', 10);
+      parts.forEach(function(p){ d.line(wrapText(p.a + ' & ' + p.b, 70)[0] + ': ' + p.runs + (p.open ? ' (not out)' : ''), 'F3', 9); });
+    }
+  });
+
+  M.inns.forEach(function(inn, i){
+    var st = replay(i);
+    d.pageBreak();
+    d.line('Ball by ball: ' + batTeam(i) + ', innings ' + (i+1), 'F2', 14, {lh:1.5});
+    d.line('Format: over.ball, bowler to striker, what happened, score after the ball', 'F1', 9);
+    groupLog(st).forEach(function(g){
+      if(g.over===null){ g.rows.forEach(function(r){ d.line('   ' + r.note, 'F3', 9); }); return; }
+      d.ensure(44); d.gap(6);
+      d.line('Over ' + (g.over+1) + ', ' + g.bowler + ': ' + g.runs + ' run' + (g.runs===1 ? '' : 's'), 'F2', 10);
+      g.rows.forEach(function(r){
+        if(r.note){ d.line('   ' + r.note, 'F3', 9); return; }
+        var lines = wrapText(r.bowler + ' to ' + r.striker + ': ' + r.text, 78);
+        lines.forEach(function(l, k){
+          d.line(k===0 ? padR(r.over,5) + padR(l,79) + padL(r.score + '/' + r.wkts,8) : '     ' + l, 'F3', 9);
+        });
+      });
+    });
+  });
+  return d.build();
+}
+function downloadPDF(){
+  var S = M.setup;
+  var name = ((S.title || (S.a + ' v ' + S.b)) + ' ' + dateStr()).replace(/[^A-Za-z0-9]+/g, '-').replace(/^-|-$/g, '') + '.pdf';
+  try{
+    var blob = new Blob([buildPDF()], {type:'application/pdf'});
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a'); a.href = url; a.download = name;
+    document.body.appendChild(a); a.click();
+    setTimeout(function(){ a.remove(); URL.revokeObjectURL(url); }, 5000);
+    toast('PDF ready: ' + name);
+  }catch(err){ console.error(err); toast('Could not create the PDF: ' + err.message); }
+}
+
+/* ------------------------------ events ------------------------------- */
+document.addEventListener('click', function(e){
+  var t = e.target.closest('button'); if(!t) return;
+  if(t.closest('.overlay')) return;
+  if(t.dataset.tab){ ui.tab = t.dataset.tab; render(); return; }
+  if(t.dataset.inn!=null){ ui.cardInn = +t.dataset.inn; render(); return; }
+  if(t.dataset.view){ ui.cardView = t.dataset.view; render(); return; }
+  if(t.dataset.a){ act(t.dataset.a); return; }
+  if(t.dataset.m){ matchAction(t.dataset.m); return; }
+  if(t.dataset.h){ homeAction(t.dataset.h, t.dataset.id); }
+});
+document.addEventListener('change', function(e){
+  var k = e.target.dataset && e.target.dataset.s; if(!k) return;
+  if(!isScorer()){ toast('Only the scorer can change match settings'); render(); return; }
+  var S = M.setup, v = e.target.value, val;
+  if(['overs','maxWkts','maxBowlerOvers'].indexOf(k) >= 0){
+    var num = parseInt(v, 10); if(isNaN(num)) num = S[k];
+    var lo = k==='maxBowlerOvers' ? 0 : 1, hi = k==='maxWkts' ? 10 : 100;
+    val = Math.max(lo, Math.min(hi, num));
+  } else val = v.trim() || (k==='a' ? 'Team A' : k==='b' ? 'Team B' : '');
+  var obj = {}; obj[k] = val;
+  LIVE.fb.update(dbRef('matches/' + LIVE.mid + '/setup'), obj).catch(writeError);
+});
+async function homeAction(a, id){
+  if(ui.busy) return; ui.busy = true;
+  try{
+    if(a==='new') await createMatch();
+    else if(a==='open') await openPrompt();
+    else if(a==='recent'){ location.hash = '#m=' + id; route(); }
+    else if(a==='retry'){ LIVE.error = ''; render(); await boot(); }
+  } finally { ui.busy = false; render(); }
+}
+async function matchAction(a){
+  if(ui.busy) return; ui.busy = true;
+  try{
+    if(a==='pdf') downloadPDF();
+    else if(a==='text') await textBox('Scorecard text', buildText(), false);
+    else if(a==='logtext') await textBox('Ball log', buildLogText(ui.cardInn), false);
+    else if(a==='share') await shareLink();
+    else if(a==='home'){ location.hash = ''; route(); }
+  } finally { ui.busy = false; render(); }
+}
+/* keep the screen awake while scoring (where the browser allows it) */
+var wake = null;
+async function keepAwake(){
+  try{ if(navigator.wakeLock && !wake){ wake = await navigator.wakeLock.request('screen'); wake.addEventListener('release', function(){ wake = null; }); } }catch(e){}
+}
+document.addEventListener('pointerdown', keepAwake, {once:true});
+document.addEventListener('visibilitychange', function(){ if(document.visibilityState==='visible' && ui.tab==='score') keepAwake(); });
+boot();
+</script>
+</body>
+</html>
