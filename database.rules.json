@@ -1,0 +1,52 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+    "adminClaims": {
+      "$uid": {
+        ".write": "auth != null && $uid === auth.uid",
+        ".validate": "newData.isString() && newData.val().length <= 64"
+      }
+    },
+    "pins": {
+      "$mid": {
+        ".write": "auth != null && !data.exists() && root.child('adminKey').isString() && root.child('adminClaims').child(auth.uid).val() === root.child('adminKey').val()",
+        ".validate": "newData.isString() && newData.val().length >= 4 && newData.val().length <= 12"
+      }
+    },
+    "claims": {
+      "$mid": {
+        "$uid": {
+          ".write": "auth != null && $uid === auth.uid",
+          ".validate": "newData.isString() && newData.val().length <= 12"
+        }
+      }
+    },
+    "matches": {
+      "$mid": {
+        ".read": "auth != null && ((data.child('closedAt').isNumber() && now < data.child('closedAt').val() + 86400000) || (!data.child('closedAt').exists() && data.child('created').isNumber() && now < data.child('created').val() + 172800000))",
+        "created": {
+          ".write": "auth != null && !data.exists() && root.child('matches').child($mid).child('scorer').child('uid').val() === auth.uid",
+          ".validate": "newData.isNumber()"
+        },
+        "closedAt": {
+          ".write": "auth != null && !data.exists() && root.child('matches').child($mid).child('scorer').child('uid').val() === auth.uid",
+          ".validate": "newData.isNumber()"
+        },
+        "setup": {
+          ".write": "auth != null && root.child('matches').child($mid).child('scorer').child('uid').val() === auth.uid && !root.child('matches').child($mid).child('closedAt').exists() && root.child('matches').child($mid).child('created').isNumber() && now < root.child('matches').child($mid).child('created').val() + 172800000"
+        },
+        "events": {
+          "$n": {
+            ".write": "auth != null && root.child('matches').child($mid).child('scorer').child('uid').val() === auth.uid && !root.child('matches').child($mid).child('closedAt').exists() && root.child('matches').child($mid).child('created').isNumber() && now < root.child('matches').child($mid).child('created').val() + 172800000",
+            ".validate": "newData.hasChildren(['t', 'inn'])"
+          }
+        },
+        "scorer": {
+          ".write": "auth != null && !root.child('matches').child($mid).child('closedAt').exists() && (!root.child('matches').child($mid).child('created').exists() || (root.child('matches').child($mid).child('created').isNumber() && now < root.child('matches').child($mid).child('created').val() + 172800000)) && root.child('pins').child($mid).exists() && root.child('claims').child($mid).child(auth.uid).val() === root.child('pins').child($mid).val() && (!data.exists() || data.child('uid').val() === auth.uid || (data.child('hb').isNumber() && now - data.child('hb').val() > 120000))",
+          ".validate": "newData.hasChildren(['uid', 'name', 'hb']) && newData.child('uid').val() === auth.uid && newData.child('name').isString() && newData.child('name').val().length <= 40 && newData.child('hb').isNumber()"
+        }
+      }
+    }
+  }
+}

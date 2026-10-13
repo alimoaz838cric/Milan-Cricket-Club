@@ -152,13 +152,16 @@ td .how{display:block;color:var(--muted);font-size:13px}
   </nav>
 </div>
 
+<script src="firebase-config.js"></script>
 <script>
 /* ========================================================================
    CLUB SETTINGS - the club admin edits this block ONCE (see SETUP-GUIDE.txt)
    Paste the values from Firebase: Project settings > Your apps > SDK setup.
    These values are safe to be public. The database rules protect the data.
    ======================================================================== */
-var FIREBASE_CONFIG = {
+/* The admin can either put the values in the separate file firebase-config.js (recommended),
+   or paste them here. firebase-config.js wins if it exists. */
+var FIREBASE_CONFIG = (typeof FIREBASE_CONFIG !== 'undefined' && FIREBASE_CONFIG) || {
   apiKey: "AIzaSyDpLkCyoe-pHX4OzBUZBXRgGRecygyYQIg",
   authDomain: "milan-cricket-club.firebaseapp.com",
   databaseURL: "https://milan-cricket-club-default-rtdb.asia-southeast1.firebasedatabase.app",
@@ -306,7 +309,8 @@ function matchResult(){
 
 /* ------------------------------ storage ------------------------------ */
 /* The match lives in the shared database. Only small personal settings are kept on the phone. */
-var LS_NAME = 'cricket-live-name', LS_RECENT = 'cricket-live-recent';
+var LS_NAME = 'cricket-live-name', LS_RECENT = 'cricket-live-recent', LS_ADMIN = 'cricket-admin-key', LS_PIN = 'cricket-live-pin-';
+var EXPIRE_HOURS = 24;   /* must match the 86400000 in the database rules */
 function lsGet(k){ try{ return localStorage.getItem(k); }catch(e){ return null; } }
 function lsSet(k, v){ try{ localStorage.setItem(k, v); }catch(e){} }
 M = newMatch();
@@ -500,6 +504,7 @@ async function announceDone(i, st){
         close(true);
       });
     });
+    await offerLock();
   }
 }
 async function pickBowler(mid){
@@ -698,7 +703,7 @@ var ui = {tab:'score', cardInn:0, cardView:'card', busy:false};
 var SDK_VERSION = '10.12.2';
 var STALE_MS = 120000;
 var LIVE = {fb:null, db:null, uid:null, mid:'', ready:false, loaded:false, exists:true, missing:false, connected:true,
-  offset:0, scorer:null, events:[], setup:null, unsub:[], error:''};
+  offset:0, scorer:null, events:[], setup:null, unsub:[], error:'', closedAt:null, pendingPin:''};
 
 function configMissing(){ return String(FIREBASE_CONFIG.apiKey || '').indexOf('PASTE') === 0; }
 function rid(){ return Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4); }
@@ -710,7 +715,7 @@ function withTimeout(p, ms){
   });
 }
 function nowMs(){ return Date.now() + (LIVE.offset || 0); }
-function isScorer(){ return !!(LIVE.scorer && LIVE.uid && LIVE.scorer.uid === LIVE.uid); }
+function isScorer(){ return !!(!LIVE.closedAt && LIVE.scorer && LIVE.uid && LIVE.scorer.uid === LIVE.uid); }
 function scorerFresh(){
   var s = LIVE.scorer; if(!s) return false;
   if(typeof s.hb !== 'number') return true;
@@ -766,7 +771,7 @@ function rebuildM(){
 function closeMatch(){
   LIVE.unsub.forEach(function(u){ try{ u(); }catch(e){} });
   LIVE.unsub = [];
-  LIVE.mid = ''; LIVE.loaded = false; LIVE.exists = true; LIVE.scorer = null; LIVE.events = []; LIVE.setup = null;
+  LIVE.mid = ''; LIVE.loaded = false; LIVE.exists = true; LIVE.scorer = null; LIVE.events = []; LIVE.setup = null; LIVE.closedAt = null; LIVE.error = '';
   M = newMatch();
 }
 function remember(mid){
@@ -781,13 +786,13 @@ function openMatch(mid){
   var un = LIVE.fb.onValue(dbRef('matches/' + mid), function(snap){
     var val = snap.val();
     LIVE.loaded = true;
-    if(!val){ LIVE.exists = false; LIVE.setup = null; LIVE.events = []; LIVE.scorer = null; }
-    else { LIVE.exists = true; LIVE.setup = val.setup || null; LIVE.events = eventsArray(val.events); LIVE.scorer = val.scorer || null; }
+    if(!val){ LIVE.exists = false; LIVE.setup = null; LIVE.events = []; LIVE.scorer = null; LIVE.closedAt = null; }
+    else { LIVE.exists = true; LIVE.setup = val.setup || null; LIVE.events = eventsArray(val.events); LIVE.scorer = val.scorer || null; LIVE.closedAt = (typeof val.closedAt === 'number') ? val.closedAt : null; }
     rebuildM();
     if(val) remember(mid);
     render();
   }, function(err){
-    LIVE.error = (err && err.message) || 'Could not read the match';
+    LIVE.error = isPermission(err) ? 'This match link has expired, or it is not valid.' : ((err && err.message) || 'Could not read the match');
     LIVE.loaded = true; LIVE.exists = false; render();
   });
   LIVE.unsub.push(un);
@@ -852,16 +857,18 @@ async function becomeScorer(){
   if(isScorer()){ toast('You are already the scorer'); return; }
   if(LIVE.scorer && scorerFresh()){ toast(LIVE.scorer.name + ' is scoring right now. Ask them to hand over.'); return; }
   var name = await ask({title:'Your name', sub:'Shown to everyone watching', ph:'e.g. Ali', chips:[]}); if(!name) return;
-  var pin = await ask({title:'Match PIN', sub:'Ask the batting side captain for the PIN', ph:'PIN'}); if(!pin) return;
+  var pin = LIVE.pendingPin || lsGet(LS_PIN + LIVE.mid) || '';
+  if(!pin){ pin = await ask({title:'Match PIN', sub:'Ask the match admin for the PIN', ph:'PIN'}); if(!pin) return; }
   lsSet(LS_NAME, name);
   try{
     await withTimeout(LIVE.fb.set(dbRef('claims/' + LIVE.mid + '/' + LIVE.uid), pin), 10000);
     await claimScorer(LIVE.mid, name);
+    lsSet(LS_PIN + LIVE.mid, pin); LIVE.pendingPin = '';
     toast('You are now the scorer');
   }catch(err){
     var m = String((err && err.message) || '');
     if(m.indexOf('BUSY:') === 0) toast(m.slice(5) + ' is scoring right now');
-    else if(isPermission(err)) toast('That PIN is not correct');
+    else if(isPermission(err)){ lsSet(LS_PIN + LIVE.mid, ''); LIVE.pendingPin = ''; toast('That PIN is not correct, or this match is locked'); }
     else if(m === 'TIMEOUT') toast('Slow signal. Please try again.');
     else toast('Could not take over: ' + m);
   }
@@ -876,6 +883,8 @@ async function releaseScoring(){
 
 /* ---- create / open / share ---- */
 async function createMatch(){
+  var adminKey = lsGet(LS_ADMIN);
+  if(!adminKey){ toast('Only the club admin can start a match. Use the admin starting link.'); return; }
   var vals = {a:'Team A', b:'Team B', batFirst:'a', overs:'30', name:lsGet(LS_NAME) || '', pin:''};
   for(;;){
     var f = await form('New live match', 'Everyone with the link can watch. Only people with the PIN can score.', [
@@ -897,17 +906,21 @@ async function createMatch(){
   }
   var mid = newMid();
   try{
+    await withTimeout(LIVE.fb.set(dbRef('adminClaims/' + LIVE.uid), adminKey), 10000);
     await withTimeout(LIVE.fb.set(dbRef('pins/' + mid), vals.pin), 10000);
     await withTimeout(LIVE.fb.set(dbRef('claims/' + mid + '/' + LIVE.uid), vals.pin), 10000);
     await claimScorer(mid, vals.name);
+    await withTimeout(LIVE.fb.set(dbRef('matches/' + mid + '/created'), LIVE.fb.serverTimestamp()), 10000);
     var setup = newMatch().setup;
     setup.a = vals.a; setup.b = vals.b; setup.batFirst = vals.batFirst; setup.overs = parseInt(vals.overs, 10);
     await withTimeout(LIVE.fb.set(dbRef('matches/' + mid + '/setup'), setup), 10000);
   }catch(err){
-    toast('Could not create the match: ' + ((err && err.message) || err));
+    if(isPermission(err)) toast('Not allowed. The admin starting key is wrong or has been changed. Ask the admin for the starting link.');
+    else toast('Could not create the match: ' + ((err && err.message) || err));
     return;
   }
   lsSet(LS_NAME, vals.name);
+  lsSet(LS_PIN + mid, vals.pin);
   location.hash = '#m=' + mid;
   route();
   await info('Match created', 'Share the link with everyone so they can watch.\n\nMatch PIN: ' + vals.pin + '\nGive the PIN only to people who will score.');
@@ -937,9 +950,37 @@ async function shareLink(){
   }
   await textBox('Match link (viewers only)', url, false);
 }
+async function shareScorerLink(){
+  var pin = lsGet(LS_PIN + LIVE.mid);
+  if(!pin){ toast('The PIN is not saved on this phone'); return; }
+  var url = location.href.split('#')[0] + '#m=' + LIVE.mid + '&pin=' + pin;
+  await textBox('Scorer link: send privately. Anyone with it can score.', url, false);
+}
+async function lockMatch(){
+  if(!isScorer() || LIVE.closedAt) return;
+  try{ await withTimeout(LIVE.fb.set(dbRef('matches/' + LIVE.mid + '/closedAt'), LIVE.fb.serverTimestamp()), 10000); toast('Match locked'); }
+  catch(err){ writeError(err); }
+}
+async function offerLock(){
+  if(!isScorer() || LIVE.closedAt) return;
+  if(await yesno('Lock the match?', 'Nobody can change it after this, and the link stops working ' + EXPIRE_HOURS + ' hours later. Download the PDF first if you have not.', 'Lock match')) await lockMatch();
+}
+function stripHash(mid){
+  try{ history.replaceState(null, '', location.pathname + location.search + (mid ? '#m=' + mid : '')); }catch(e){}
+}
+/* admin starting link (#admin=KEY) and scorer link (#m=ID&pin=PIN): read the secret, keep it, remove it from the address bar */
+function absorbHash(){
+  var hs = location.hash || '';
+  var a = /[#&]admin=([A-Za-z0-9]+)/.exec(hs), p = /[#&]pin=([A-Za-z0-9]+)/.exec(hs);
+  if(!a && !p) return;
+  if(a){ lsSet(LS_ADMIN, a[1]); toast('Admin mode is on for this phone'); }
+  if(p){ LIVE.pendingPin = p[1]; }
+  stripHash(parseHash());
+}
 function parseHash(){ var m = /[#&]m=([A-Za-z0-9]+)/.exec(location.hash || ''); return m ? m[1] : ''; }
 function route(){
   if(!LIVE.ready) return;
+  absorbHash();
   var mid = parseHash();
   if(!mid){ if(LIVE.mid) closeMatch(); render(); return; }
   if(mid === LIVE.mid) return;
@@ -1110,7 +1151,12 @@ function renderMatch(){
   var html = '<div class="h3" style="margin-top:4px">Result</div><div class="res">' + esc(res || (M.inns.length ? 'Match in progress' : 'Not started')) + '</div>' +
     '<div class="acts" style="margin-top:0"><button class="btn full" data-m="share">Share match link</button></div>' +
     '<div class="acts"><button class="btn alt" data-m="pdf">Download PDF</button><button class="btn alt" data-m="text">Scorecard text</button></div>';
-  if(sc) html += '<div class="acts"><button class="btn alt full" data-a="handover">Hand over scoring</button></div>';
+  if(LIVE.closedAt) html += '<p class="lbl" style="margin-top:12px">This match is finished and locked. Nobody can change it.</p>';
+  else if(sc){
+    html += '<div class="acts"><button class="btn alt full" data-a="handover">Hand over scoring</button></div>';
+    if(lsGet(LS_PIN + LIVE.mid)) html += '<div class="acts"><button class="btn alt full" data-m="scorerlink">Share scorer link (contains the PIN)</button></div>';
+    if(res) html += '<div class="acts"><button class="btn red full" data-m="lock">Finish and lock this match</button></div>';
+  }
   else if(!LIVE.scorer || !scorerFresh()) html += '<div class="acts"><button class="btn alt full" data-a="claim">Become scorer</button></div>';
   html += '<div class="h3">Match setup' + (sc ? '' : ' (only the scorer can change these)') + '</div>' +
     '<div class="field"><label>Match title (optional)</label><input type="text" data-s="title" value="' + esc(S.title) + '"' + dis + '></div>' +
@@ -1128,6 +1174,10 @@ function renderBar(){
   if(!LIVE.ready || !LIVE.mid){ b.className = ''; b.innerHTML = '<span>Cricket Scorer Live</span>'; return; }
   var s = LIVE.scorer, cls = '', txt = '', btn = '';
   if(!LIVE.connected){ cls = 'off'; txt = 'No signal. Reconnecting...'; }
+  else if(LIVE.closedAt){
+    var left = Math.max(0, Math.ceil((LIVE.closedAt + EXPIRE_HOURS * 3600000 - nowMs()) / 3600000));
+    cls = 'view'; txt = 'Match finished and locked. This link expires in about ' + left + ' h.';
+  }
   else if(isScorer()){ cls = 'me'; txt = 'You are the scorer'; btn = '<button data-a="handover">Hand over</button>'; }
   else if(!s){ cls = 'none'; txt = 'Nobody is scoring'; btn = '<button data-a="claim">Become scorer</button>'; }
   else if(scorerFresh()){ cls = 'view'; txt = esc(s.name) + ' is scoring. You are watching.'; }
@@ -1144,9 +1194,11 @@ function msgScreen(title, text, btns){
 }
 function renderHome(){
   var list = []; try{ list = JSON.parse(lsGet(LS_RECENT) || '[]'); }catch(e){ list = []; }
+  var admin = !!lsGet(LS_ADMIN);
   var html = '<div class="start"><h1>Cricket Scorer Live</h1><p>One scorer at a time. Everyone else watches live.</p>' +
-    '<button class="btn full" data-h="new">Start a new live match</button>' +
-    '<div style="height:10px"></div><button class="btn alt full" data-h="open">Open a match (paste link)</button></div>';
+    (admin ? '<button class="btn full" data-h="new">Start a new live match</button><div style="height:10px"></div>'
+           : '<p>Matches are started by the club admin. Open the match link you were sent, or paste it below.</p>') +
+    '<button class="btn alt full" data-h="open">Open a match (paste link)</button></div>';
   if(list.length){
     html += '<div class="h3">Recent matches on this phone</div><div class="card">' +
       list.map(function(x){ return '<div class="line"><div class="nm">' + esc(x.title) + '</div><button class="chip" data-h="recent" data-id="' + esc(x.id) + '">Open</button></div>'; }).join('') + '</div>';
@@ -1167,7 +1219,7 @@ function render(){
   }
   if(!LIVE.mid){ renderHome(); return; }
   if(!LIVE.loaded){ msgScreen('Loading match...', 'Please wait.'); return; }
-  if(!LIVE.exists){ msgScreen('Match not found', LIVE.error || 'This link does not match any live game.', '<button class="btn full" data-m="home">Back to all matches</button>'); return; }
+  if(!LIVE.exists){ msgScreen(LIVE.error.indexOf('expired') >= 0 ? 'Link expired' : 'Match not found', LIVE.error || 'This link does not match any live game.', '<button class="btn full" data-m="home">Back to all matches</button>'); return; }
   document.querySelectorAll('.tabs button').forEach(function(b){ b.setAttribute('aria-selected', String(b.dataset.tab===ui.tab)); });
   if(ui.tab==='score') renderScore(); else if(ui.tab==='card') renderCard(); else renderMatch();
 }
@@ -1391,6 +1443,8 @@ async function matchAction(a){
     else if(a==='text') await textBox('Scorecard text', buildText(), false);
     else if(a==='logtext') await textBox('Ball log', buildLogText(ui.cardInn), false);
     else if(a==='share') await shareLink();
+    else if(a==='scorerlink') await shareScorerLink();
+    else if(a==='lock') await offerLock();
     else if(a==='home'){ location.hash = ''; route(); }
   } finally { ui.busy = false; render(); }
 }
