@@ -130,6 +130,7 @@ td .how{display:block;color:var(--muted);font-size:13px}
 #bar.none,#bar.stale{background:var(--amber-soft);color:var(--ink)}
 #bar button{border:1.5px solid currentColor;background:transparent;border-radius:10px;padding:6px 12px;font-weight:700;white-space:nowrap}
 .mono{font-family:ui-monospace,Menlo,Consolas,monospace}
+.chip.on{background:var(--green);color:var(--on-green);border-color:var(--green)}
 .lg .nm{white-space:normal}
 .fow{margin:0;padding:0;list-style:none;color:var(--ink)}
 .fow li{padding:5px 0;border-bottom:1px solid var(--line)}
@@ -173,7 +174,7 @@ var CREDIT = ['bowled','caught','lbw','stumped','hitwicket'];
 function same(a,b){ return String(a||'').trim().toLowerCase() === String(b||'').trim().toLowerCase(); }
 function fmtOv(b){ return Math.floor(b/6) + '.' + (b%6); }
 function newMatch(){
-  return {v:1, setup:{title:'', a:'Team A', b:'Team B', batFirst:'a', overs:30, maxWkts:10, maxBowlerOvers:6, playersA:[], playersB:[], capA:'', vcA:'', wkA:'', twA:'', capB:'', vcB:'', wkB:'', twB:'', pinfo:[]}, inns:[]};
+  return {v:1, setup:{title:'', a:'Team A', b:'Team B', batFirst:'a', overs:30, maxWkts:10, maxBowlerOvers:6, playersA:[], playersB:[], capA:'', vcA:'', wkA:'', twA:'', capB:'', vcB:'', wkB:'', twB:'', pinfo:[], tidA:'', tidB:''}, inns:[]};
 }
 function teamName(side){ return side==='a' ? M.setup.a : M.setup.b; }
 function battingSide(i){ return i===0 ? M.setup.batFirst : (M.setup.batFirst==='a' ? 'b' : 'a'); }
@@ -428,20 +429,94 @@ function squadBlock(side){
   if(r.tw) html += row(r.tw, '');
   return html;
 }
+/* ============ PERMANENT TEAM LIBRARY ============
+   teams/{id}: { name, players: { key: {n:name, h:hand, b:bowling style, m:last match} } }
+   Only the admin can read the whole library. A match's scorer can only ADD or UPDATE players of that match's two teams. */
+var LIB = {teams:{}, loaded:false};
+function byName(a, b){ return a.name.toLowerCase() < b.name.toLowerCase() ? -1 : 1; }
+function pkey(name){
+  var k = String(name).toLowerCase().replace(/[.$#\[\]\/\s]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 40);
+  return k || 'x';
+}
+function isAdmin(){ return !!lsGet(LS_ADMIN); }
+async function ensureAdminClaim(){
+  var k = lsGet(LS_ADMIN); if(!k) throw new Error('NOT_ADMIN');
+  await withTimeout(LIVE.fb.set(dbRef('adminClaims/' + LIVE.uid), k), 10000);
+}
+async function loadLib(force){
+  if(!isAdmin()) return;
+  if(!force && LIB.loaded && LIB.at && Date.now() - LIB.at < 60000) return;
+  await ensureAdminClaim();
+  var snap = await withTimeout(LIVE.fb.get(dbRef('teams')), 10000);
+  LIB.teams = snap.val() || {}; LIB.loaded = true; LIB.at = Date.now();
+}
+function libTeams(){
+  return Object.keys(LIB.teams).map(function(id){
+    var t = LIB.teams[id] || {};
+    return {id:id, name:t.name || '(unnamed)', count:Object.keys(t.players || {}).filter(function(k){ return t.players[k] && t.players[k].n; }).length};
+  }).sort(byName);
+}
+function libName(tid){ return (LIB.teams[tid] || {}).name || ''; }
+function libPlayers(tid){
+  var t = LIB.teams[tid]; if(!t || !t.players) return [];
+  return Object.keys(t.players).map(function(k){ var p = t.players[k]; return p && p.n ? {key:k, name:p.n, n:p.n, h:p.h || '', b:p.b || ''} : null; })
+    .filter(Boolean).sort(byName);
+}
+function detMapOf(det){ var m = {}; (det || []).forEach(function(d){ m[String(d.n).toLowerCase()] = {h:d.h || '', b:d.b || ''}; }); return m; }
+function sideOfName(name){
+  var sides = ['a','b'];
+  for(var k = 0; k < 2; k++){ if(knownPlayers(sides[k]).some(function(x){ return same(x, name); })) return sides[k]; }
+  return '';
+}
+/* best effort: if the database refuses (for example the match has no saved team), scoring carries on */
+async function libSync(side, names, details){
+  var tid = M.setup[side==='a' ? 'tidA' : 'tidB'];
+  if(!tid || !LIVE.mid || !names || !names.length) return;
+  var upd = {};
+  names.forEach(function(n){
+    var k = pkey(n);
+    upd['players/' + k + '/n'] = n;
+    upd['players/' + k + '/m'] = LIVE.mid;
+    var d = details && details[String(n).toLowerCase()];
+    if(d){ upd['players/' + k + '/h'] = d.h || ''; upd['players/' + k + '/b'] = d.b || ''; }
+  });
+  try{ await withTimeout(LIVE.fb.update(dbRef('teams/' + tid), upd), 10000); }catch(e){}
+}
+function libAutoAdd(ev, inn){
+  var bs = battingSide(inn), fs = bs==='a' ? 'b' : 'a', add = {a:[], b:[]};
+  if(ev.t==='start'){ add[bs].push(ev.striker, ev.non); add[fs].push(ev.bowler); }
+  if(ev.t==='bowler' && ev.name) add[fs].push(ev.name);
+  if(ev.newBatter) add[bs].push(ev.newBatter);
+  if(ev.w && ev.w.fielder) add[fs].push(ev.w.fielder);
+  ['a','b'].forEach(function(s){
+    var fresh = add[s].filter(function(n){
+      if(!n) return false;
+      var key = LIVE.mid + s + pkey(n);
+      if(LIVE.libSent[key]) return false;
+      LIVE.libSent[key] = 1; return true;
+    });
+    if(fresh.length) libSync(s, fresh, null);
+  });
+}
+
 async function editSquad(side){
   if(!isScorer()){ toast('Only the scorer can change the squad'); return; }
   var r = squadRole(side), cur = squadList(side);
+  var tid = M.setup[side==='a' ? 'tidA' : 'tidB'], pool = [];
+  if(tid && isAdmin()){ try{ await loadLib(); pool = libPlayers(tid); }catch(e){ pool = []; } }
   var res = await sheet(function(sh, close){
     sh.innerHTML = '<h2>' + esc(teamName(side)) + ' squad</h2>' +
       '<p class="sub">One player per line (up to 15). You can leave this empty and names will be added as players come in.</p>' +
+      (pool.length ? '<div class="lbl">Saved players: tap a name to add or remove it</div><div class="chips" id="sqpool"></div>' : '') +
       '<div class="field"><label>Players</label><textarea id="sqp" placeholder="One name per line">' + esc(cur.join('\n')) + '</textarea></div>' +
       '<div class="two"><div class="field"><label>Captain</label><select id="sqc"></select></div><div class="field"><label>Vice-captain</label><select id="sqv"></select></div></div>' +
       '<div class="two"><div class="field"><label>Wicket-keeper</label><select id="sqw"></select></div><div class="field"><label>12th man (optional)</label><input type="text" id="sqt" autocomplete="off" value="' + esc(r.tw) + '" placeholder="Name"></div></div>' +
       '<div class="h3" style="margin-top:6px">Batting hand and bowling style (optional)</div><div id="sqd"></div>' +
       '<div class="acts"><button class="btn alt" data-x="c">Cancel</button><button class="btn" data-x="ok">Save squad</button></div>';
-    var ta = sh.querySelector('#sqp'), st12 = sh.querySelector('#sqt'), box = sh.querySelector('#sqd');
+    var ta = sh.querySelector('#sqp'), st12 = sh.querySelector('#sqt'), box = sh.querySelector('#sqd'), poolBox = sh.querySelector('#sqpool');
     var sels = {c:sh.querySelector('#sqc'), v:sh.querySelector('#sqv'), w:sh.querySelector('#sqw')};
     var info = {}, ns = [];
+    pool.forEach(function(p){ if(p.h || p.b) info[p.n.toLowerCase()] = {h:p.h, b:p.b}; });
     infoList().forEach(function(x){ info[String(x.n).toLowerCase()] = {h:x.h || '', b:x.b || ''}; });
     function opts(arr, sel, first){
       return '<option value="">' + first + '</option>' + arr.map(function(o){ return '<option value="' + esc(o.v) + '"' + (o.v === sel ? ' selected' : '') + '>' + esc(o.l) + '</option>'; }).join('');
@@ -452,10 +527,23 @@ async function editSquad(side){
         var sel = sels[p[0]], keep = sel.value || p[1];
         sel.innerHTML = '<option value="">None</option>' + ns.map(function(x){ return '<option value="' + esc(x) + '"' + (same(x, keep) ? ' selected' : '') + '>' + esc(x) + '</option>'; }).join('');
       });
+      if(poolBox){
+        poolBox.innerHTML = pool.map(function(p){
+          var on = ns.some(function(x){ return same(x, p.n); });
+          return '<button class="chip' + (on ? ' on' : '') + '" data-pn="' + esc(p.n) + '">' + esc(p.n) + '</button>';
+        }).join('');
+      }
       box.innerHTML = ns.map(function(x, k){
         var d = info[x.toLowerCase()] || {h:'', b:''};
         return '<div class="field" data-i="' + k + '"><label>' + esc(x) + '</label><div class="two"><select class="ph">' + opts(HANDS, d.h, 'Batting hand') + '</select><select class="pb">' + opts(STYLES, d.b, 'Bowling style') + '</select></div></div>';
       }).join('') || '<p class="lbl">Add players above to set their details.</p>';
+    }
+    function toggle(name){
+      var list = parseNames(ta.value), at = -1;
+      list.forEach(function(x, k){ if(same(x, name)) at = k; });
+      if(at >= 0) list.splice(at, 1); else list.push(name);
+      ta.value = list.join('\n');
+      fill();
     }
     fill();
     ta.addEventListener('input', fill);
@@ -466,6 +554,7 @@ async function editSquad(side){
     });
     sh.addEventListener('click', function(e){
       var b = e.target.closest('button'); if(!b) return;
+      if(b.dataset.pn){ toggle(b.dataset.pn); return; }
       if(b.dataset.x==='c') close(null);
       else if(b.dataset.x==='ok'){
         var players = parseNames(ta.value), cap = sels.c.value, vc = sels.v.value, det = [];
@@ -483,13 +572,14 @@ async function editSquad(side){
   var keep = infoList().filter(function(x){ return !players.some(function(p){ return same(p, x.n); }); });
   var all = keep.concat(res.det || []);
   upd.pinfo = all.length ? all : null;
-  try{ await LIVE.fb.update(dbRef('matches/' + LIVE.mid + '/setup'), upd); toast('Squad saved'); }
+  try{
+    await LIVE.fb.update(dbRef('matches/' + LIVE.mid + '/setup'), upd); toast('Squad saved');
+    libSync(side, players.concat(res.tw ? [res.tw] : []), detMapOf(res.det));
+  }
   catch(err){ writeError(err); }
 }
-async function editPlayer(name){
-  if(!isScorer()){ toast('Only the scorer can change player details'); return; }
-  var cur = infoOf(name) || {h:'', b:''};
-  var res = await sheet(function(sh, close){
+function detailsSheet(name, cur){
+  return sheet(function(sh, close){
     function opts(arr, sel, first){
       return '<option value="">' + first + '</option>' + arr.map(function(o){ return '<option value="' + esc(o.v) + '"' + (o.v === sel ? ' selected' : '') + '>' + esc(o.l) + '</option>'; }).join('');
     }
@@ -503,10 +593,19 @@ async function editPlayer(name){
       else if(b.dataset.x==='ok') close({h:sh.querySelector('#pdh').value, b:sh.querySelector('#pdb').value});
     });
   });
+}
+async function editPlayer(name){
+  if(!isScorer()){ toast('Only the scorer can change player details'); return; }
+  var cur = infoOf(name) || {h:'', b:''};
+  var res = await detailsSheet(name, cur);
   if(!res) return;
   var list = infoList().filter(function(x){ return !same(x.n, name); });
   if(res.h || res.b) list.push({n:name, h:res.h || '', b:res.b || ''});
-  try{ await LIVE.fb.update(dbRef('matches/' + LIVE.mid + '/setup'), {pinfo: list.length ? list : null}); toast('Saved'); }
+  try{
+    await LIVE.fb.update(dbRef('matches/' + LIVE.mid + '/setup'), {pinfo: list.length ? list : null}); toast('Saved');
+    var sd = sideOfName(name), dm = {}; dm[name.toLowerCase()] = {h:res.h || '', b:res.b || ''};
+    if(sd) libSync(sd, [name], dm);
+  }
   catch(err){ writeError(err); }
 }
 async function playerAction(name){
@@ -892,13 +991,13 @@ async function moreMenu(){
 }
 
 /* ------------------------------ rendering ---------------------------- */
-var ui = {tab:'score', cardInn:0, cardView:'card', busy:false};
+var ui = {tab:'score', cardInn:0, cardView:'card', busy:false, lib:{screen:'', tid:''}};
 
 /* ============================ LIVE SYNC ============================== */
 var SDK_VERSION = '10.12.2';
 var STALE_MS = 120000;
 var LIVE = {fb:null, db:null, uid:null, mid:'', ready:false, loaded:false, exists:true, missing:false, connected:true,
-  offset:0, scorer:null, events:[], setup:null, unsub:[], error:'', closedAt:null, pendingPin:''};
+  offset:0, scorer:null, events:[], setup:null, unsub:[], error:'', closedAt:null, pendingPin:'', libSent:{}};
 
 function configMissing(){ return String(FIREBASE_CONFIG.apiKey || '').indexOf('PASTE') === 0; }
 function rid(){ return Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4); }
@@ -1009,6 +1108,7 @@ async function appendEvent(ev, inn){
   }catch(err){ token.cancelled = true; throw err; }
   if(!res.committed) throw new Error('STALE');
   if(LIVE.events.length === n){ LIVE.events.push(e); rebuildM(); }
+  libAutoAdd(e, inn);
   return n;
 }
 async function removeLastEvent(){
@@ -1080,11 +1180,18 @@ async function releaseScoring(){
 async function createMatch(){
   var adminKey = lsGet(LS_ADMIN);
   if(!adminKey){ toast('Only the club admin can start a match. Use the admin starting link.'); return; }
-  var vals = {a:'Team A', b:'Team B', batFirst:'a', overs:'30', name:lsGet(LS_NAME) || '', pin:''};
+  try{ await loadLib(true); }catch(err){ LIB.teams = {}; }
+  var teams = libTeams();
+  var opts = teams.map(function(t){ return {v:t.id, l:t.name + ' (' + t.count + ' players)'}; });
+  opts.push({v:'', l:'+ New team (type the name below)'});
+  var vals = {ta:teams[0] ? teams[0].id : '', na:'', tb:teams[1] ? teams[1].id : '', nb:'', batFirst:'a', overs:'30', name:lsGet(LS_NAME) || '', pin:''};
+  var nameA, nameB, overs;
   for(;;){
-    var f = await form('New live match', 'Everyone with the link can watch. Only people with the PIN can score.', [
-      {k:'a', label:'Team A', value:vals.a},
-      {k:'b', label:'Team B', value:vals.b},
+    var f = await form('New live match', 'Pick saved teams, or add a new one. Everyone with the link can watch. Only people with the PIN can score.', [
+      {k:'ta', label:'Team A', type:'select', value:vals.ta, options:opts},
+      {k:'na', label:'Team A: new team name (only if you chose + New team)', value:vals.na, ph:'e.g. Milan Cricket Club'},
+      {k:'tb', label:'Team B', type:'select', value:vals.tb, options:opts},
+      {k:'nb', label:'Team B: new team name (only if you chose + New team)', value:vals.nb, ph:'e.g. Bergamo CC'},
       {k:'batFirst', label:'Who bats first', type:'select', value:vals.batFirst, options:[{v:'a', l:'Team A'},{v:'b', l:'Team B'}]},
       {k:'overs', label:'Overs per innings', type:'number', value:vals.overs},
       {k:'name', label:'Your name (you will score first)', value:vals.name, ph:'e.g. Ali'},
@@ -1092,17 +1199,26 @@ async function createMatch(){
     ], 'Create match');
     if(!f) return;
     vals = f;
-    var overs = parseInt(f.overs, 10);
-    if(!f.a || !f.b){ toast('Enter both team names'); continue; }
+    nameA = f.ta ? libName(f.ta) : f.na.replace(/\s+/g, ' ').trim().slice(0, 40);
+    nameB = f.tb ? libName(f.tb) : f.nb.replace(/\s+/g, ' ').trim().slice(0, 40);
+    overs = parseInt(f.overs, 10);
+    if(!nameA || !nameB){ toast('Choose a team, or type a new team name, for both sides'); continue; }
+    if(same(nameA, nameB)){ toast('Team A and Team B must be different'); continue; }
     if(isNaN(overs) || overs < 1 || overs > 100){ toast('Overs must be 1 to 100'); continue; }
     if(!f.name){ toast('Enter your name'); continue; }
     if(!/^[A-Za-z0-9]{4,12}$/.test(f.pin)){ toast('PIN: 4 to 12 letters or numbers, no spaces'); continue; }
     break;
   }
+  var tidA = vals.ta, tidB = vals.tb;
+  /* a typed name that already exists in the library uses that team */
+  teams.forEach(function(t){ if(!tidA && same(t.name, nameA)) tidA = t.id; if(!tidB && same(t.name, nameB)) tidB = t.id; });
   var mid = newMid(), step = '';
   try{
     step = 'admin key';
     await withTimeout(LIVE.fb.set(dbRef('adminClaims/' + LIVE.uid), adminKey), 10000);
+    step = 'team library';
+    if(!tidA){ tidA = newMid(); await withTimeout(LIVE.fb.set(dbRef('teams/' + tidA + '/name'), nameA), 10000); }
+    if(!tidB){ tidB = newMid(); await withTimeout(LIVE.fb.set(dbRef('teams/' + tidB + '/name'), nameB), 10000); }
     step = 'match PIN (admin key check)';
     await withTimeout(LIVE.fb.set(dbRef('pins/' + mid), vals.pin), 10000);
     step = 'PIN claim';
@@ -1113,10 +1229,10 @@ async function createMatch(){
     await withTimeout(LIVE.fb.set(dbRef('matches/' + mid + '/created'), LIVE.fb.serverTimestamp()), 10000);
     step = 'match settings';
     var setup = newMatch().setup;
-    setup.a = vals.a; setup.b = vals.b; setup.batFirst = vals.batFirst; setup.overs = parseInt(vals.overs, 10);
+    setup.a = nameA; setup.b = nameB; setup.tidA = tidA; setup.tidB = tidB; setup.batFirst = vals.batFirst; setup.overs = overs;
     await withTimeout(LIVE.fb.set(dbRef('matches/' + mid + '/setup'), setup), 10000);
   }catch(err){
-    if(isPermission(err)) toast('The database refused this step: ' + step + '. ' + (step === 'admin key' || step.indexOf('PIN (admin') === 0 ? 'Check the adminKey in Firebase matches your starting link, and that the new rules are published.' : 'Check the new rules are published in Firebase.'));
+    if(isPermission(err)) toast('The database refused this step: ' + step + '. ' + (step === 'admin key' || step.indexOf('PIN (admin') === 0 || step === 'team library' ? 'Check the adminKey in Firebase matches your starting link, and that the new rules are published.' : 'Check the new rules are published in Firebase.'));
     else toast('Could not create the match: ' + ((err && err.message) || err));
     return;
   }
@@ -1127,7 +1243,7 @@ async function createMatch(){
   await info('Match created', 'Share the link with everyone so they can watch.\n\nMatch PIN: ' + vals.pin + '\nGive the PIN only to people who will score.');
   await shareLink();
   await waitFor(function(){ return isScorer(); }, 4000);
-  if(isScorer() && await yesno('Add the squads now?', 'Enter both teams, the captains and the 12th men. You can skip this and names will be added as players come in.', 'Add squads')){
+  if(isScorer() && await yesno('Choose the playing XI now?', 'Pick the players, captains and 12th men for both teams. You can skip this and names will be added as players come in.', 'Choose players')){
     await editSquad('a');
     await editSquad('b');
   }
@@ -1404,10 +1520,13 @@ function msgScreen(title, text, btns){
   $('#view').innerHTML = '<div class="start"><h1>' + esc(title) + '</h1><p style="white-space:pre-line">' + esc(text) + '</p>' + (btns || '') + '</div>';
 }
 function renderHome(){
+  if(ui.lib.screen==='teams'){ renderTeams(); return; }
+  if(ui.lib.screen==='team'){ renderTeam(ui.lib.tid); return; }
   var list = []; try{ list = JSON.parse(lsGet(LS_RECENT) || '[]'); }catch(e){ list = []; }
-  var admin = !!lsGet(LS_ADMIN);
+  var admin = isAdmin();
   var html = '<div class="start"><h1>Cricket Scorer Live</h1><p>One scorer at a time. Everyone else watches live.</p>' +
-    (admin ? '<button class="btn full" data-h="new">Start a new live match</button><div style="height:10px"></div>'
+    (admin ? '<button class="btn full" data-h="new">Start a new live match</button><div style="height:10px"></div>' +
+             '<button class="btn alt full" data-h="teams">Teams and players</button><div style="height:10px"></div>'
            : '<p>Matches are started by the club admin. Open the match link you were sent, or paste it below.</p>') +
     '<button class="btn alt full" data-h="open">Open a match (paste link)</button></div>';
   if(list.length){
@@ -1416,6 +1535,89 @@ function renderHome(){
   }
   $('#pad').innerHTML = '';
   $('#view').innerHTML = html;
+}
+function renderTeams(){
+  var list = libTeams();
+  var html = '<div class="start"><h1>Teams</h1><p>Your permanent teams. New players are saved here automatically when you score.</p>' +
+    '<button class="btn full" data-h="newteam">Add a team</button><div style="height:10px"></div><button class="btn alt full" data-h="tback">Back</button></div>';
+  if(list.length){
+    html += '<div class="card">' + list.map(function(t){
+      return '<div class="line"><div class="nm">' + esc(t.name) + '<div class="lbl">' + t.count + ' player' + (t.count===1 ? '' : 's') + '</div></div><button class="chip" data-h="team" data-id="' + esc(t.id) + '">Open</button></div>';
+    }).join('') + '</div>';
+  } else html += '<p class="lbl" style="padding:0 14px">No teams yet. Add one here, or type a new team name when you start a match.</p>';
+  $('#pad').innerHTML = '';
+  $('#view').innerHTML = html;
+}
+function renderTeam(tid){
+  var t = LIB.teams[tid];
+  if(!t){ ui.lib = {screen:'teams', tid:''}; renderTeams(); return; }
+  var pl = libPlayers(tid);
+  var html = '<div class="start" style="padding-bottom:8px"><h1>' + esc(t.name || '') + '</h1><p>' + pl.length + ' player' + (pl.length===1 ? '' : 's') + '</p>' +
+    '<button class="btn full" data-h="addplayers">Add players</button><div style="height:10px"></div>' +
+    '<button class="btn alt full" data-h="tlist">All teams</button></div>';
+  if(pl.length){
+    html += '<div class="card">' + pl.map(function(p){
+      var hh = null, ss = null, d = [];
+      HANDS.forEach(function(x){ if(x.v === p.h) d.push(x.l); });
+      STYLES.forEach(function(x){ if(x.v === p.b) d.push(x.l); });
+      return '<div class="line lg"><div class="nm">' + esc(p.n) + (d.length ? '<div class="lbl" style="font-weight:500">' + esc(d.join(', ')) + '</div>' : '') + '</div>' +
+        '<div><button class="chip" data-h="libedit" data-k="' + esc(p.key) + '">Edit</button> <button class="chip" data-h="libremove" data-k="' + esc(p.key) + '">Remove</button></div></div>';
+    }).join('') + '</div>';
+  }
+  html += '<div class="acts"><button class="btn alt" data-h="renameteam">Rename team</button><button class="btn red" data-h="delteam">Delete team</button></div>';
+  $('#pad').innerHTML = '';
+  $('#view').innerHTML = html;
+}
+function namesSheet(title){
+  return sheet(function(sh, close){
+    sh.innerHTML = '<h2>' + esc(title) + '</h2><p class="sub">One name per line.</p><div class="field"><textarea id="nms" placeholder="One name per line"></textarea></div>' +
+      '<div class="acts"><button class="btn alt" data-x="c">Cancel</button><button class="btn" data-x="ok">Add</button></div>';
+    sh.addEventListener('click', function(e){
+      var b = e.target.closest('button'); if(!b) return;
+      if(b.dataset.x==='c') close(null);
+      else if(b.dataset.x==='ok') close(parseNames(sh.querySelector('#nms').value));
+    });
+  });
+}
+async function libNewTeam(){
+  var nm = await ask({title:'New team', ph:'Team name'}); if(!nm) return;
+  nm = nm.replace(/\s+/g, ' ').trim().slice(0, 40);
+  if(libTeams().some(function(t){ return same(t.name, nm); })){ toast('That team already exists'); return; }
+  var tid = newMid();
+  try{ await ensureAdminClaim(); await withTimeout(LIVE.fb.set(dbRef('teams/' + tid + '/name'), nm), 10000); await loadLib(true); ui.lib = {screen:'team', tid:tid}; }
+  catch(err){ toast('Could not add the team: ' + ((err && err.message) || err)); }
+}
+async function libAddPlayers(){
+  var tid = ui.lib.tid, names = await namesSheet('Add players to ' + libName(tid));
+  if(!names || !names.length) return;
+  var upd = {}; names.forEach(function(n){ upd['players/' + pkey(n) + '/n'] = n; });
+  try{ await withTimeout(LIVE.fb.update(dbRef('teams/' + tid), upd), 10000); await loadLib(true); toast('Players added'); }
+  catch(err){ toast('Could not add players: ' + ((err && err.message) || err)); }
+}
+async function libRenameTeam(){
+  var tid = ui.lib.tid, nm = await ask({title:'Rename ' + libName(tid), ph:'Team name'}); if(!nm) return;
+  nm = nm.replace(/\s+/g, ' ').trim().slice(0, 40);
+  try{ await withTimeout(LIVE.fb.set(dbRef('teams/' + tid + '/name'), nm), 10000); await loadLib(true); }
+  catch(err){ toast('Could not rename: ' + ((err && err.message) || err)); }
+}
+async function libDeleteTeam(){
+  var tid = ui.lib.tid;
+  if(!(await yesno('Delete team', 'Delete ' + libName(tid) + ' and its saved players? Matches already played are not affected.', 'Delete'))) return;
+  try{ await withTimeout(LIVE.fb.remove(dbRef('teams/' + tid)), 10000); await loadLib(true); ui.lib = {screen:'teams', tid:''}; }
+  catch(err){ toast('Could not delete: ' + ((err && err.message) || err)); }
+}
+async function libEditPlayer(key){
+  var tid = ui.lib.tid, p = libPlayers(tid).filter(function(x){ return x.key === key; })[0]; if(!p) return;
+  var res = await detailsSheet(p.n, {h:p.h, b:p.b}); if(!res) return;
+  var upd = {}; upd['players/' + key + '/h'] = res.h || ''; upd['players/' + key + '/b'] = res.b || '';
+  try{ await withTimeout(LIVE.fb.update(dbRef('teams/' + tid), upd), 10000); await loadLib(true); toast('Saved'); }
+  catch(err){ toast('Could not save: ' + ((err && err.message) || err)); }
+}
+async function libRemovePlayer(key){
+  var tid = ui.lib.tid, p = libPlayers(tid).filter(function(x){ return x.key === key; })[0]; if(!p) return;
+  if(!(await yesno('Remove player', 'Remove ' + p.n + ' from ' + libName(tid) + '?', 'Remove'))) return;
+  try{ await withTimeout(LIVE.fb.remove(dbRef('teams/' + tid + '/players/' + key)), 10000); await loadLib(true); }
+  catch(err){ toast('Could not remove: ' + ((err && err.message) || err)); }
 }
 function render(){
   renderBar();
@@ -1643,7 +1845,7 @@ document.addEventListener('click', function(e){
   if(t.dataset.p != null){ playerAction(t.dataset.p); return; }
   if(t.dataset.a){ act(t.dataset.a); return; }
   if(t.dataset.m){ matchAction(t.dataset.m); return; }
-  if(t.dataset.h){ homeAction(t.dataset.h, t.dataset.id); }
+  if(t.dataset.h){ homeAction(t.dataset.h, t.dataset.id, t.dataset.k); }
 });
 document.addEventListener('change', function(e){
   var k = e.target.dataset && e.target.dataset.s; if(!k) return;
@@ -1657,13 +1859,23 @@ document.addEventListener('change', function(e){
   var obj = {}; obj[k] = val;
   LIVE.fb.update(dbRef('matches/' + LIVE.mid + '/setup'), obj).catch(writeError);
 });
-async function homeAction(a, id){
+async function homeAction(a, id, k){
   if(ui.busy) return; ui.busy = true;
   try{
     if(a==='new') await createMatch();
     else if(a==='open') await openPrompt();
     else if(a==='recent'){ location.hash = '#m=' + id; route(); }
     else if(a==='retry'){ LIVE.error = ''; render(); await boot(); }
+    else if(a==='teams'){ ui.lib = {screen:'teams', tid:''}; try{ await loadLib(true); }catch(err){ toast('Could not load teams: ' + ((err && err.message) || err)); } }
+    else if(a==='tlist'){ ui.lib = {screen:'teams', tid:''}; }
+    else if(a==='tback'){ ui.lib = {screen:'', tid:''}; }
+    else if(a==='team'){ ui.lib = {screen:'team', tid:id}; }
+    else if(a==='newteam') await libNewTeam();
+    else if(a==='addplayers') await libAddPlayers();
+    else if(a==='renameteam') await libRenameTeam();
+    else if(a==='delteam') await libDeleteTeam();
+    else if(a==='libedit') await libEditPlayer(k);
+    else if(a==='libremove') await libRemovePlayer(k);
   } finally { ui.busy = false; render(); }
 }
 async function matchAction(a){
