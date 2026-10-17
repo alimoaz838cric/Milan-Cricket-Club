@@ -131,6 +131,12 @@ td .how{display:block;color:var(--muted);font-size:13px}
 #bar button{border:1.5px solid currentColor;background:transparent;border-radius:10px;padding:6px 12px;font-weight:700;white-space:nowrap}
 .mono{font-family:ui-monospace,Menlo,Consolas,monospace}
 .chip.on{background:var(--green);color:var(--on-green);border-color:var(--green)}
+.seg4{display:flex;gap:4px;flex:none}
+.seg4 button{border:1.5px solid var(--line);background:var(--surface);border-radius:8px;padding:9px 0;min-width:46px;font-weight:700;font-size:14px}
+.seg4 button.on[data-s=o]{background:var(--bg);color:var(--muted);border-color:var(--muted)}
+.seg4 button.on[data-s=i]{background:var(--amber-soft);border-color:var(--amber)}
+.seg4 button.on[data-s=a]{background:var(--green);color:var(--on-green);border-color:var(--green)}
+.seg4 button.on[data-s=b]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
 .lg .nm{white-space:normal}
 .fow{margin:0;padding:0;list-style:none;color:var(--ink)}
 .fow li{padding:5px 0;border-bottom:1px solid var(--line)}
@@ -174,7 +180,7 @@ var CREDIT = ['bowled','caught','lbw','stumped','hitwicket'];
 function same(a,b){ return String(a||'').trim().toLowerCase() === String(b||'').trim().toLowerCase(); }
 function fmtOv(b){ return Math.floor(b/6) + '.' + (b%6); }
 function newMatch(){
-  return {v:1, setup:{title:'', a:'Team A', b:'Team B', batFirst:'a', overs:30, maxWkts:10, maxBowlerOvers:6, playersA:[], playersB:[], capA:'', vcA:'', wkA:'', twA:'', capB:'', vcB:'', wkB:'', twB:'', pinfo:[], tidA:'', tidB:''}, inns:[]};
+  return {v:1, setup:{title:'', a:'Team A', b:'Team B', batFirst:'a', overs:30, maxWkts:10, maxBowlerOvers:6, playersA:[], playersB:[], capA:'', vcA:'', wkA:'', twA:'', capB:'', vcB:'', wkB:'', twB:'', pinfo:[], tidA:'', tidB:'', poolTid:''}, inns:[]};
 }
 function teamName(side){ return side==='a' ? M.setup.a : M.setup.b; }
 function battingSide(i){ return i===0 ? M.setup.batFirst : (M.setup.batFirst==='a' ? 'b' : 'a'); }
@@ -323,7 +329,7 @@ function matchResult(){
 
 /* ------------------------------ storage ------------------------------ */
 /* The match lives in the shared database. Only small personal settings are kept on the phone. */
-var LS_NAME = 'cricket-live-name', LS_RECENT = 'cricket-live-recent', LS_ADMIN = 'cricket-admin-key', LS_PIN = 'cricket-live-pin-';
+var LS_NAME = 'cricket-live-name', LS_RECENT = 'cricket-live-recent', LS_ADMIN = 'cricket-admin-key', LS_PIN = 'cricket-live-pin-', LS_LASTPOOL = 'cricket-last-pool', LS_LASTSPLIT = 'cricket-last-split';
 var EXPIRE_HOURS = 24;   /* must match the 86400000 in the database rules */
 function lsGet(k){ try{ return localStorage.getItem(k); }catch(e){ return null; } }
 function lsSet(k, v){ try{ localStorage.setItem(k, v); }catch(e){} }
@@ -429,6 +435,185 @@ function squadBlock(side){
   if(r.tw) html += row(r.tw, '');
   return html;
 }
+function libTid(side){ return M.setup.poolTid || M.setup[side==='a' ? 'tidA' : 'tidB'] || ''; }
+function poolFor(side){
+  var tid = libTid(side); if(!tid) return [];
+  var list = libPlayers(tid);
+  if(M.setup.poolTid){
+    var oth = squadList(side==='a' ? 'b' : 'a');
+    list = list.filter(function(p){ return !oth.some(function(x){ return same(x, p.n); }); });
+  }
+  return list;
+}
+function splitRandom(names){
+  var arr = names.slice();
+  for(var k = arr.length - 1; k > 0; k--){ var j = Math.floor(Math.random() * (k + 1)); var t = arr[k]; arr[k] = arr[j]; arr[j] = t; }
+  var half = Math.ceil(arr.length / 2);
+  return {a:arr.slice(0, half), b:arr.slice(half)};
+}
+/* starting point for the team chooser: this match's teams, else the teams from the last match with this pool */
+function splitInitial(){
+  var tid = M.setup.poolTid, pool = tid ? libPlayers(tid).map(function(p){ return p.n; }) : [];
+  var a0 = squadList('a'), b0 = squadList('b');
+  if(!a0.length && !b0.length){
+    try{ var ls = JSON.parse(lsGet(LS_LASTSPLIT) || '{}'); if(ls.pool === tid){ a0 = ls.a || []; b0 = ls.b || []; } }catch(e){}
+  }
+  var all = uniq(pool.concat(a0).concat(b0)), st = {};
+  all.forEach(function(n){
+    st[n] = a0.some(function(x){ return same(x, n); }) ? 'a' : (b0.some(function(x){ return same(x, n); }) ? 'b' : 'o');
+  });
+  return {all:all, st:st};
+}
+async function editSplit(){
+  if(!isScorer()){ toast('Only the scorer can choose the teams'); return; }
+  if(!M.setup.poolTid){ toast('This match has no player pool'); return; }
+  if(isAdmin()){ try{ await loadLib(); }catch(e){} }
+  var init = splitInitial(), all = init.all.slice(), st = init.st, added = [];
+  var res = await sheet(function(sh, close){
+    sh.innerHTML = '<h2>Choose the teams</h2>' +
+      '<p class="sub">For each player tap Out, In, A or B. "In" means playing but not in a team yet. Random split shares everyone marked In, A or B between the two teams.</p>' +
+      '<div class="acts" style="margin-top:0"><button class="btn alt" data-x="allin">Everyone in</button><button class="btn alt" data-x="rand">Random split</button><button class="btn alt" data-x="clear">Clear</button></div>' +
+      '<div class="lbl" id="spc" style="margin:8px 0"></div><div class="card" id="spl"></div>' +
+      '<div class="field"><label>Add a new player</label><div class="two"><input type="text" id="spn" autocomplete="off" placeholder="Name"><button class="btn alt" data-x="add">Add</button></div></div>' +
+      '<div class="acts"><button class="btn alt" data-x="c">Cancel</button><button class="btn" data-x="ok">Save teams</button></div>';
+    var list = sh.querySelector('#spl'), cnt = sh.querySelector('#spc');
+    function count(s){ return all.filter(function(n){ return st[n] === s; }).length; }
+    function draw(){
+      var lab = {o:'Out', i:'In', a:'A', b:'B'};
+      list.innerHTML = all.map(function(n, k){
+        return '<div class="line lg"><div class="nm">' + esc(n) + '</div><div class="seg4" data-k="' + k + '">' +
+          ['o','i','a','b'].map(function(s){ return '<button data-s="' + s + '" class="' + (st[n] === s ? 'on' : '') + '">' + lab[s] + '</button>'; }).join('') + '</div></div>';
+      }).join('') || '<div class="line"><span class="lbl">No players yet. Add names below.</span></div>';
+      cnt.textContent = 'Team A: ' + count('a') + '   Team B: ' + count('b') + '   In, not in a team yet: ' + count('i');
+    }
+    draw();
+    sh.addEventListener('click', function(e){
+      var b = e.target.closest('button'); if(!b) return;
+      if(b.dataset.s){ var row = b.closest('[data-k]'); st[all[+row.dataset.k]] = b.dataset.s; draw(); return; }
+      var x = b.dataset.x;
+      if(x==='c') close(null);
+      else if(x==='allin'){ all.forEach(function(n){ if(st[n] === 'o') st[n] = 'i'; }); draw(); }
+      else if(x==='clear'){ all.forEach(function(n){ st[n] = 'o'; }); draw(); }
+      else if(x==='rand'){
+        var ps = all.filter(function(n){ return st[n] !== 'o'; });
+        if(ps.length < 2){ toast('Mark at least two players In first'); return; }
+        var sp = splitRandom(ps);
+        sp.a.forEach(function(n){ st[n] = 'a'; }); sp.b.forEach(function(n){ st[n] = 'b'; });
+        draw();
+      }
+      else if(x==='add'){
+        var inp = sh.querySelector('#spn');
+        parseNames(inp.value).forEach(function(n){
+          var at = -1; all.forEach(function(y, k){ if(same(y, n)) at = k; });
+          if(at < 0){ all.push(n); added.push(n); at = all.length - 1; }
+          st[all[at]] = 'i';
+        });
+        inp.value = ''; draw();
+      }
+      else if(x==='ok'){
+        var A = all.filter(function(n){ return st[n] === 'a'; }), B = all.filter(function(n){ return st[n] === 'b'; });
+        if(count('i')){ toast('Put every player marked In into team A or B, or mark them Out'); return; }
+        if(A.length > 15 || B.length > 15){ toast('Each team can have up to 15 players'); return; }
+        if(!A.length && !B.length){ toast('Pick at least one player'); return; }
+        close({a:A, b:B, added:added});
+      }
+    });
+  });
+  if(!res) return;
+  var upd = {playersA: res.a.length ? res.a : null, playersB: res.b.length ? res.b : null};
+  ['a','b'].forEach(function(s){
+    var k = s==='a' ? 'A' : 'B', r = squadRole(s), list = s==='a' ? res.a : res.b;
+    function gone(nm){ return nm && !list.some(function(x){ return same(x, nm); }); }
+    if(gone(r.cap)) upd['cap' + k] = '';
+    if(gone(r.vc)) upd['vc' + k] = '';
+    if(gone(r.wk)) upd['wk' + k] = '';
+  });
+  try{
+    await LIVE.fb.update(dbRef('matches/' + LIVE.mid + '/setup'), upd);
+    lsSet(LS_LASTSPLIT, JSON.stringify({pool:M.setup.poolTid, a:res.a, b:res.b}));
+    toast('Teams saved');
+    if(res.added.length) libSync('a', res.added, null);
+  }
+  catch(err){ writeError(err); }
+}
+
+async function createMatch(){
+  if(!lsGet(LS_ADMIN)){ toast('Only the club admin can start a match. Use the admin starting link.'); return; }
+  var kind = await choose('New match', [
+    {l:'Two saved teams (for example Milan v Bergamo)', v:'teams'},
+    {l:'Friendly: split one player pool into two teams', v:'pool'}], {cols:1, sub:'Which kind of match is it?'});
+  if(!kind) return;
+  if(kind==='pool') await createPoolMatch(); else await createTeamsMatch();
+}
+async function createPoolMatch(){
+  var adminKey = lsGet(LS_ADMIN);
+  try{ await loadLib(true); }catch(err){ LIB.teams = {}; }
+  var teams = libTeams();
+  if(!teams.length){ toast('First add your pool under Teams and players, for example "Pavia Cricketers"'); return; }
+  var last = {}; try{ last = JSON.parse(lsGet(LS_LASTPOOL) || '{}'); }catch(e){ last = {}; }
+  var opts = teams.map(function(t){ return {v:t.id, l:t.name + ' (' + t.count + ' players)'}; });
+  var vals = {pool:(last.pool && LIB.teams[last.pool]) ? last.pool : teams[0].id, na:last.na || 'Team A', nb:last.nb || 'Team B',
+    batFirst:'a', overs:String(last.overs || 8), name:lsGet(LS_NAME) || '', pin:last.pin || ''};
+  var nameA, nameB, overs;
+  for(;;){
+    var f = await form('Friendly match from a pool', 'Players come from the saved pool. You will split them into two teams next.', [
+      {k:'pool', label:'Player pool', type:'select', value:vals.pool, options:opts},
+      {k:'na', label:'Team A name', value:vals.na, ph:'e.g. Blues'},
+      {k:'nb', label:'Team B name', value:vals.nb, ph:'e.g. Reds'},
+      {k:'batFirst', label:'Who bats first', type:'select', value:vals.batFirst, options:[{v:'a', l:'Team A'},{v:'b', l:'Team B'}]},
+      {k:'overs', label:'Overs per innings', type:'number', value:vals.overs},
+      {k:'name', label:'Your name (you will score first)', value:vals.name, ph:'e.g. Ali'},
+      {k:'pin', label:'Match PIN (4 to 12 letters or numbers)', value:vals.pin, ph:'e.g. 4821'}
+    ], 'Create match');
+    if(!f) return;
+    vals = f;
+    nameA = f.na.replace(/\s+/g, ' ').trim().slice(0, 40); nameB = f.nb.replace(/\s+/g, ' ').trim().slice(0, 40);
+    overs = parseInt(f.overs, 10);
+    if(!f.pool || !LIB.teams[f.pool]){ toast('Choose a player pool'); continue; }
+    if(!nameA || !nameB){ toast('Give both teams a name'); continue; }
+    if(same(nameA, nameB)){ toast('Team A and Team B must have different names'); continue; }
+    if(isNaN(overs) || overs < 1 || overs > 100){ toast('Overs must be 1 to 100'); continue; }
+    if(!f.name){ toast('Enter your name'); continue; }
+    if(!/^[A-Za-z0-9]{4,12}$/.test(f.pin)){ toast('PIN: 4 to 12 letters or numbers, no spaces'); continue; }
+    break;
+  }
+  var mid = newMid(), step = '';
+  try{
+    step = 'admin key';
+    await withTimeout(LIVE.fb.set(dbRef('adminClaims/' + LIVE.uid), adminKey), 10000);
+    step = 'match PIN (admin key check)';
+    await withTimeout(LIVE.fb.set(dbRef('pins/' + mid), vals.pin), 10000);
+    step = 'PIN claim';
+    await withTimeout(LIVE.fb.set(dbRef('claims/' + mid + '/' + LIVE.uid), vals.pin), 10000);
+    step = 'scorer role';
+    await claimScorer(mid, vals.name);
+    step = 'match start time';
+    await withTimeout(LIVE.fb.set(dbRef('matches/' + mid + '/created'), LIVE.fb.serverTimestamp()), 10000);
+    step = 'match settings';
+    var setup = newMatch().setup;
+    setup.a = nameA; setup.b = nameB; setup.poolTid = vals.pool; setup.batFirst = vals.batFirst; setup.overs = overs;
+    await withTimeout(LIVE.fb.set(dbRef('matches/' + mid + '/setup'), setup), 10000);
+  }catch(err){
+    if(isPermission(err)) toast('The database refused this step: ' + step + '. ' + (step === 'admin key' || step.indexOf('PIN (admin') === 0 ? 'Check the adminKey in Firebase matches your starting link, and that the new rules are published.' : 'Check the new rules are published in Firebase.'));
+    else toast('Could not create the match: ' + ((err && err.message) || err));
+    return;
+  }
+  lsSet(LS_NAME, vals.name);
+  lsSet(LS_PIN + mid, vals.pin);
+  lsSet(LS_LASTPOOL, JSON.stringify({pool:vals.pool, na:nameA, nb:nameB, overs:overs, pin:vals.pin}));
+  location.hash = '#m=' + mid;
+  route();
+  await info('Match created', 'Share the link with everyone so they can watch.\n\nMatch PIN: ' + vals.pin + '\nGive the PIN only to people who will score.');
+  await shareLink();
+  await waitFor(function(){ return isScorer(); }, 4000);
+  if(isScorer()){
+    await editSplit();
+    if(squadList('a').length && await yesno('Set captains and keepers now?', 'Choose the captain, vice-captain, wicket-keeper and 12th man for each team. You can skip this.', 'Set now')){
+      await editSquad('a');
+      await editSquad('b');
+    }
+  }
+}
 /* ============ PERMANENT TEAM LIBRARY ============
    teams/{id}: { name, players: { key: {n:name, h:hand, b:bowling style, m:last match} } }
    Only the admin can read the whole library. A match's scorer can only ADD or UPDATE players of that match's two teams. */
@@ -470,7 +655,7 @@ function sideOfName(name){
 }
 /* best effort: if the database refuses (for example the match has no saved team), scoring carries on */
 async function libSync(side, names, details){
-  var tid = M.setup[side==='a' ? 'tidA' : 'tidB'];
+  var tid = libTid(side);
   if(!tid || !LIVE.mid || !names || !names.length) return;
   var upd = {};
   names.forEach(function(n){
@@ -502,8 +687,8 @@ function libAutoAdd(ev, inn){
 async function editSquad(side){
   if(!isScorer()){ toast('Only the scorer can change the squad'); return; }
   var r = squadRole(side), cur = squadList(side);
-  var tid = M.setup[side==='a' ? 'tidA' : 'tidB'], pool = [];
-  if(tid && isAdmin()){ try{ await loadLib(); pool = libPlayers(tid); }catch(e){ pool = []; } }
+  var tid = libTid(side), pool = [];
+  if(tid && isAdmin()){ try{ await loadLib(); pool = poolFor(side); }catch(e){ pool = []; } }
   var res = await sheet(function(sh, close){
     sh.innerHTML = '<h2>' + esc(teamName(side)) + ' squad</h2>' +
       '<p class="sub">One player per line (up to 15). You can leave this empty and names will be added as players come in.</p>' +
@@ -1177,7 +1362,7 @@ async function releaseScoring(){
 }
 
 /* ---- create / open / share ---- */
-async function createMatch(){
+async function createTeamsMatch(){
   var adminKey = lsGet(LS_ADMIN);
   if(!adminKey){ toast('Only the club admin can start a match. Use the admin starting link.'); return; }
   try{ await loadLib(true); }catch(err){ LIB.teams = {}; }
@@ -1491,7 +1676,7 @@ function renderMatch(){
     '<div class="two"><div class="field"><label>Overs per innings</label><input type="number" inputmode="numeric" min="1" max="100" data-s="overs" value="' + S.overs + '"' + dis + '></div>' +
     '<div class="field"><label>Max wickets (10 = 11 a side)</label><input type="number" inputmode="numeric" min="1" max="10" data-s="maxWkts" value="' + S.maxWkts + '"' + dis + '></div></div>' +
     '<div class="field"><label>Max overs per bowler (0 = no limit)</label><input type="number" inputmode="numeric" min="0" max="100" data-s="maxBowlerOvers" value="' + S.maxBowlerOvers + '"' + dis + '></div>' +
-    '<div class="h3">Squads</div><div class="card">' + squadBlock('a') + '</div><div style="height:8px"></div><div class="card">' + squadBlock('b') + '</div>' +
+    (sc && M.setup.poolTid ? '<div class="acts" style="margin-top:0"><button class="btn full" data-m="split">Choose teams from the pool</button></div>' : '') + '<div class="h3">Squads</div><div class="card">' + squadBlock('a') + '</div><div style="height:8px"></div><div class="card">' + squadBlock('b') + '</div>' +
     '<div class="h3">Other matches</div><div class="acts" style="margin-top:0"><button class="btn alt full" data-m="home">All matches / start a new match</button></div>' +
     '<p class="lbl" style="margin-top:14px">The match is stored online, so it is still there after you close the app. The PDF is your permanent copy.</p>';
   v.innerHTML = html;
@@ -1889,6 +2074,7 @@ async function matchAction(a){
     else if(a==='lock') await offerLock();
     else if(a==='squada') await editSquad('a');
     else if(a==='squadb') await editSquad('b');
+    else if(a==='split') await editSplit();
     else if(a==='home'){ location.hash = ''; route(); }
   } finally { ui.busy = false; render(); }
 }
