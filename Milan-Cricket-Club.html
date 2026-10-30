@@ -329,7 +329,7 @@ function matchResult(){
 
 /* ------------------------------ storage ------------------------------ */
 /* The match lives in the shared database. Only small personal settings are kept on the phone. */
-var LS_NAME = 'cricket-live-name', LS_RECENT = 'cricket-live-recent', LS_ADMIN = 'cricket-admin-key', LS_PIN = 'cricket-live-pin-', LS_LASTPOOL = 'cricket-last-pool', LS_LASTSPLIT = 'cricket-last-split';
+var LS_NAME = 'cricket-live-name', LS_RECENT = 'cricket-live-recent', LS_ADMIN = 'cricket-admin-key', LS_PIN = 'cricket-live-pin-', LS_LASTPOOL = 'cricket-last-pool', LS_LASTSPLIT = 'cricket-last-split', LS_SQ = 'cricket-live-sq-';
 var EXPIRE_HOURS = 24;   /* must match the 86400000 in the database rules */
 function lsGet(k){ try{ return localStorage.getItem(k); }catch(e){ return null; } }
 function lsSet(k, v){ try{ localStorage.setItem(k, v); }catch(e){} }
@@ -354,7 +354,7 @@ var STYLES = [
   {v:'RALS', l:'Right-arm leg spin', a:'RALS'}, {v:'LALS', l:'Left-arm leg spin', a:'LALS'},
   {v:'RAM', l:'Right-arm medium', a:'RAM'}, {v:'LAM', l:'Left-arm medium', a:'LAM'},
   {v:'RAF', l:'Right-arm fast', a:'RAF'}, {v:'LAF', l:'Left-arm fast', a:'LAF'}];
-function infoList(){ return asList(M.setup.pinfo); }
+function infoList(){ return asList(M.setup.pinfoA).concat(asList(M.setup.pinfoB)).concat(asList(M.setup.pinfo)); }
 function infoOf(name){ var l = infoList(); for(var k = 0; k < l.length; k++){ if(same(l[k].n, name)) return l[k]; } return null; }
 function handOf(name){ var i = infoOf(name); if(!i || !i.h) return null; for(var k = 0; k < HANDS.length; k++){ if(HANDS[k].v === i.h) return HANDS[k]; } return null; }
 function styleOf(name){ var i = infoOf(name); if(!i || !i.b) return null; for(var k = 0; k < STYLES.length; k++){ if(STYLES[k].v === i.b) return STYLES[k]; } return null; }
@@ -428,7 +428,7 @@ function squadBlock(side){
       (det ? '<div class="lbl" style="font-weight:500">' + esc(det) + '</div>' : '') + '</div>' +
       (sc ? '<button class="chip" data-p="' + esc(x) + '">Details</button>' : '') + '</div>';
   }
-  var html = '<div class="line"><div class="nm">' + esc(teamName(side)) + '</div>' + (sc ? '<button class="chip" data-m="squad' + side + '">Edit squad</button>' : '') + '</div>';
+  var html = '<div class="line"><div class="nm">' + esc(teamName(side)) + '</div>' + (canEditSquad(side) ? '<button class="chip" data-m="squad' + side + '">Edit squad</button>' : '') + '</div>';
   if(!list.length && !extra.length && !r.tw) html += '<div class="line"><span class="lbl">No squad entered. Names are added as players come in.</span></div>';
   list.forEach(function(x){ html += row(x, ''); });
   extra.forEach(function(x){ html += row(x, 'added during the match'); });
@@ -684,8 +684,9 @@ function libAutoAdd(ev, inn){
   });
 }
 
+function canEditSquad(side){ return !!(isScorer() || (LIVE.sq[side] && !LIVE.closedAt)); }
 async function editSquad(side){
-  if(!isScorer()){ toast('Only the scorer can change the squad'); return; }
+  if(!canEditSquad(side)){ toast("Only the scorer or this team's captain can change the squad"); return; }
   var r = squadRole(side), cur = squadList(side);
   var tid = libTid(side), pool = [];
   if(tid && isAdmin()){ try{ await loadLib(); pool = poolFor(side); }catch(e){ pool = []; } }
@@ -754,12 +755,12 @@ async function editSquad(side){
   var players = res.players || [];
   upd['players' + k] = players.length ? players : null;
   upd['cap' + k] = res.cap || ''; upd['vc' + k] = res.vc || ''; upd['wk' + k] = res.wk || ''; upd['tw' + k] = res.tw || '';
-  var keep = infoList().filter(function(x){ return !players.some(function(p){ return same(p, x.n); }); });
+  var keep = asList(M.setup['pinfo' + k]).filter(function(x){ return !players.some(function(p){ return same(p, x.n); }); });
   var all = keep.concat(res.det || []);
-  upd.pinfo = all.length ? all : null;
+  upd['pinfo' + k] = all.length ? all : null;
   try{
     await LIVE.fb.update(dbRef('matches/' + LIVE.mid + '/setup'), upd); toast('Squad saved');
-    libSync(side, players.concat(res.tw ? [res.tw] : []), detMapOf(res.det));
+    if(isScorer()) libSync(side, players.concat(res.tw ? [res.tw] : []), detMapOf(res.det));
   }
   catch(err){ writeError(err); }
 }
@@ -784,11 +785,21 @@ async function editPlayer(name){
   var cur = infoOf(name) || {h:'', b:''};
   var res = await detailsSheet(name, cur);
   if(!res) return;
-  var list = infoList().filter(function(x){ return !same(x.n, name); });
-  if(res.h || res.b) list.push({n:name, h:res.h || '', b:res.b || ''});
+  var sd = sideOfName(name), upd = {}, entry = {n:name, h:res.h || '', b:res.b || ''};
+  var legacy = asList(M.setup.pinfo), legacyKept = legacy.filter(function(x){ return !same(x.n, name); });
+  if(sd){
+    var kk = sd==='a' ? 'A' : 'B';
+    var lst = asList(M.setup['pinfo' + kk]).filter(function(x){ return !same(x.n, name); });
+    if(res.h || res.b) lst.push(entry);
+    upd['pinfo' + kk] = lst.length ? lst : null;
+    if(legacyKept.length !== legacy.length) upd.pinfo = legacyKept.length ? legacyKept : null;
+  } else {
+    if(res.h || res.b) legacyKept.push(entry);
+    upd.pinfo = legacyKept.length ? legacyKept : null;
+  }
   try{
-    await LIVE.fb.update(dbRef('matches/' + LIVE.mid + '/setup'), {pinfo: list.length ? list : null}); toast('Saved');
-    var sd = sideOfName(name), dm = {}; dm[name.toLowerCase()] = {h:res.h || '', b:res.b || ''};
+    await LIVE.fb.update(dbRef('matches/' + LIVE.mid + '/setup'), upd); toast('Saved');
+    var dm = {}; dm[name.toLowerCase()] = {h:res.h || '', b:res.b || ''};
     if(sd) libSync(sd, [name], dm);
   }
   catch(err){ writeError(err); }
@@ -1182,7 +1193,7 @@ var ui = {tab:'score', cardInn:0, cardView:'card', busy:false, lib:{screen:'', t
 var SDK_VERSION = '10.12.2';
 var STALE_MS = 120000;
 var LIVE = {fb:null, db:null, uid:null, mid:'', ready:false, loaded:false, exists:true, missing:false, connected:true,
-  offset:0, scorer:null, events:[], setup:null, unsub:[], error:'', closedAt:null, pendingPin:'', libSent:{}};
+  offset:0, scorer:null, events:[], setup:null, unsub:[], error:'', closedAt:null, pendingPin:'', libSent:{}, sq:{a:false, b:false}, pendingSq:null};
 
 function configMissing(){ return String(FIREBASE_CONFIG.apiKey || '').indexOf('PASTE') === 0; }
 function rid(){ return Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4); }
@@ -1250,7 +1261,7 @@ function rebuildM(){
 function closeMatch(){
   LIVE.unsub.forEach(function(u){ try{ u(); }catch(e){} });
   LIVE.unsub = [];
-  LIVE.mid = ''; LIVE.loaded = false; LIVE.exists = true; LIVE.scorer = null; LIVE.events = []; LIVE.setup = null; LIVE.closedAt = null; LIVE.error = '';
+  LIVE.mid = ''; LIVE.loaded = false; LIVE.exists = true; LIVE.scorer = null; LIVE.events = []; LIVE.setup = null; LIVE.closedAt = null; LIVE.error = ''; LIVE.sq = {a:false, b:false};
   M = newMatch();
 }
 function remember(mid){
@@ -1317,7 +1328,7 @@ function writeError(err){
   else if(m === 'OFFLINE') toast('No signal. That was NOT saved. Try again.');
   else if(m === 'TIMEOUT') toast('Slow signal. That may not have saved. Check the score, then try again.');
   else if(m === 'STALE') toast('Another phone scored first. Your screen is refreshing.');
-  else if(isPermission(err)) toast('You are no longer the scorer');
+  else if(isPermission(err)) toast((LIVE.sq.a || LIVE.sq.b) && !isScorer() ? 'Your team code is no longer valid, or the match is locked' : 'You are no longer the scorer');
   else toast('Could not save: ' + m);
   render();
 }
@@ -1472,6 +1483,62 @@ async function offerLock(){
   if(!isScorer() || LIVE.closedAt) return;
   if(await yesno('Lock the match?', 'Nobody can change it after this, and the link stops working ' + EXPIRE_HOURS + ' hours later. Download the PDF first if you have not.', 'Lock match')) await lockMatch();
 }
+function rcode(){
+  var abc = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789', s = '';
+  for(var k = 0; k < 6; k++) s += abc.charAt(Math.floor(Math.random() * abc.length));
+  return s;
+}
+/* The scorer makes a link for each team. A captain who opens it can edit ONLY that team's squad. It does not give scoring access. */
+async function teamCodes(){
+  if(!isScorer()){ toast('Only the scorer can create team links'); return; }
+  var pick = await choose('Squad links for team captains', [
+    {l:'Link for ' + teamName('a'), v:'a'}, {l:'Link for ' + teamName('b'), v:'b'},
+    {l:'New code for ' + teamName('a') + ' (the old link stops working)', v:'ra'},
+    {l:'New code for ' + teamName('b') + ' (the old link stops working)', v:'rb'}],
+    {cols:1, sub:'A captain with a link can edit only their own team squad. They cannot score. If this phone did not make the link, a new code is created and the old link stops working.'});
+  if(!pick) return;
+  var side = pick.slice(-1), reset = pick.length === 2;
+  var key = LS_SQ + LIVE.mid + side, code = lsGet(key) || '';
+  if(!code || reset){
+    var other = lsGet(LS_SQ + LIVE.mid + (side==='a' ? 'b' : 'a')) || '';
+    do { code = rcode(); } while(code === other);
+    try{ await withTimeout(LIVE.fb.set(dbRef('squadPins/' + LIVE.mid + '/' + side), code), 10000); lsSet(key, code); }
+    catch(err){ writeError(err); return; }
+  }
+  var url = location.href.split('#')[0] + '#m=' + LIVE.mid + '&sq=' + side + '&sk=' + code;
+  await textBox('Squad link for ' + teamName(side) + ' (send to the captain only)', url, false);
+}
+async function captainPick(){
+  if(LIVE.closedAt){ toast('This match is locked'); return; }
+  var side = (LIVE.pendingSq && LIVE.pendingSq.mid === LIVE.mid) ? LIVE.pendingSq.side : '';
+  if(!side){
+    side = await choose('Which team do you captain?', [{l:teamName('a'), v:'a'},{l:teamName('b'), v:'b'}], {cols:1});
+    if(!side) return;
+  }
+  await captainEdit(side);
+}
+async function captainEdit(side){
+  var k = side==='a' ? 'A' : 'B';
+  var code = (LIVE.pendingSq && LIVE.pendingSq.mid === LIVE.mid && LIVE.pendingSq.side === side) ? LIVE.pendingSq.code : (lsGet(LS_SQ + LIVE.mid + side) || '');
+  if(!LIVE.sq[side]){
+    if(!code){
+      code = await ask({title:'Team code for ' + teamName(side), sub:'Ask the scorer for your team code', ph:'Team code'});
+      if(!code) return;
+    }
+    try{
+      await withTimeout(LIVE.fb.set(dbRef('squadClaims/' + LIVE.mid + '/' + side + '/' + LIVE.uid), code), 10000);
+      var probe = {}; probe['tw' + k] = M.setup['tw' + k] || '';
+      await withTimeout(LIVE.fb.update(dbRef('matches/' + LIVE.mid + '/setup'), probe), 10000);   /* only allowed with a valid code */
+      LIVE.sq[side] = true; lsSet(LS_SQ + LIVE.mid + side, code);
+    }catch(err){
+      lsSet(LS_SQ + LIVE.mid + side, '');
+      if(LIVE.pendingSq && LIVE.pendingSq.side === side) LIVE.pendingSq = null;
+      toast(isPermission(err) ? 'That team code is not correct, or the match is locked' : 'Could not check the code. Try again.');
+      return;
+    }
+  }
+  await editSquad(side);
+}
 function stripHash(mid){
   try{ history.replaceState(null, '', location.pathname + location.search + (mid ? '#m=' + mid : '')); }catch(e){}
 }
@@ -1479,9 +1546,11 @@ function stripHash(mid){
 function absorbHash(){
   var hs = location.hash || '';
   var a = /[#&]admin=([A-Za-z0-9]+)/.exec(hs), p = /[#&]pin=([A-Za-z0-9]+)/.exec(hs);
-  if(!a && !p) return;
+  var sq = /[#&]sq=([ab])/.exec(hs), sk = /[#&]sk=([A-Za-z0-9]+)/.exec(hs);
+  if(!a && !p && !sq) return;
   if(a){ lsSet(LS_ADMIN, a[1]); toast('Admin mode is on for this phone'); }
   if(p){ LIVE.pendingPin = p[1]; }
+  if(sq && sk){ LIVE.pendingSq = {mid:parseHash(), side:sq[1], code:sk[1]}; toast('Open the Match tab to edit your team squad'); }
   stripHash(parseHash());
 }
 function parseHash(){ var m = /[#&]m=([A-Za-z0-9]+)/.exec(location.hash || ''); return m ? m[1] : ''; }
@@ -1676,7 +1745,7 @@ function renderMatch(){
     '<div class="two"><div class="field"><label>Overs per innings</label><input type="number" inputmode="numeric" min="1" max="100" data-s="overs" value="' + S.overs + '"' + dis + '></div>' +
     '<div class="field"><label>Max wickets (10 = 11 a side)</label><input type="number" inputmode="numeric" min="1" max="10" data-s="maxWkts" value="' + S.maxWkts + '"' + dis + '></div></div>' +
     '<div class="field"><label>Max overs per bowler (0 = no limit)</label><input type="number" inputmode="numeric" min="0" max="100" data-s="maxBowlerOvers" value="' + S.maxBowlerOvers + '"' + dis + '></div>' +
-    (sc && M.setup.poolTid ? '<div class="acts" style="margin-top:0"><button class="btn full" data-m="split">Choose teams from the pool</button></div>' : '') + '<div class="h3">Squads</div><div class="card">' + squadBlock('a') + '</div><div style="height:8px"></div><div class="card">' + squadBlock('b') + '</div>' +
+    (sc && M.setup.poolTid ? '<div class="acts" style="margin-top:0"><button class="btn full" data-m="split">Choose teams from the pool</button></div>' : '') + (sc ? '<div class="acts" style="margin-top:0"><button class="btn alt full" data-m="teamcodes">Squad links for team captains</button></div>' : (!LIVE.closedAt ? '<div class="acts" style="margin-top:0"><button class="btn alt full" data-m="cap">Team captain? Edit your squad</button></div>' : '')) + '<div class="h3">Squads</div><div class="card">' + squadBlock('a') + '</div><div style="height:8px"></div><div class="card">' + squadBlock('b') + '</div>' +
     '<div class="h3">Other matches</div><div class="acts" style="margin-top:0"><button class="btn alt full" data-m="home">All matches / start a new match</button></div>' +
     '<p class="lbl" style="margin-top:14px">The match is stored online, so it is still there after you close the app. The PDF is your permanent copy.</p>';
   v.innerHTML = html;
@@ -2075,6 +2144,8 @@ async function matchAction(a){
     else if(a==='squada') await editSquad('a');
     else if(a==='squadb') await editSquad('b');
     else if(a==='split') await editSplit();
+    else if(a==='teamcodes') await teamCodes();
+    else if(a==='cap') await captainPick();
     else if(a==='home'){ location.hash = ''; route(); }
   } finally { ui.busy = false; render(); }
 }
